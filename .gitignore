@@ -1,0 +1,26 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# 私有部署参数（含 account_id / database_id / bucket）
+wrangler.local.toml
+
+# 数据与备份
+data/
+*.sqlite
+*.sqlite-journal
+backups/
+shots/
+*.log
+
+# 本机专属
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本机参考资料与自动化数据（不进公开仓库）
+.workbuddy/

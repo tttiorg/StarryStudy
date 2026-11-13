@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>学习桌面</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#13191c" />
+    <meta name="application-name" content="学习桌面" />
+    <meta name="apple-mobile-web-app-title" content="学习桌面" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <script>
+      // 首帧之前决定主题：样式表加载后再切会闪一下白底（浅色）/黑底（深色）。
+      // 这个脚本必须保持与 shared 的 THEME_STORAGE_KEY 一致，且不能依赖任何模块。
+      (function () {
+        try {
+          var m = localStorage.getItem("starry.theme") || "dark";
+          var light =
+            m === "light" ||
+            (m === "auto" && window.matchMedia("(prefers-color-scheme: light)").matches);
+          var el = document.documentElement;
+          el.classList.toggle("light", light);
+          el.classList.toggle("dark", !light);
+          el.style.colorScheme = light ? "light" : "dark";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+      // 只缓存应用外壳与静态资源；业务数据一律走网络，见 sw.js。
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("/sw.js").catch(function () {});
+        });
+      }
+    </script>
+  </body>
+</html>

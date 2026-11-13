@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 用 npm ci 而不是 npm install：锁文件即契约，装出来的依赖必须可复现。
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      # 当前聚合 packages/collector 的单测；不连线上服务，纯本地断言。
+      - name: 单元测试
+        run: npm test
+
+      # 私有信息 / 疑似凭据绝不进仓库；与 pre-commit 用的是同一个脚本。
+      - name: 隐私自检
+        run: npm run check:privacy
+
+      - name: 构建前端
+        run: npm run build

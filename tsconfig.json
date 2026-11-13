@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "@starry/shared": ["./packages/shared/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/shared/src/**/*.ts",
+    "packages/worker/src/**/*.ts",
+    "packages/collector/src/**/*.ts",
+    "packages/desktop/src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", ".wrangler"]
+}

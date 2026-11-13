@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "学习桌面 · StarryStudy",
+  "short_name": "学习桌面",
+  "description": "单用户、多端同步的学习工作台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#13191c",
+  "theme_color": "#13191c",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

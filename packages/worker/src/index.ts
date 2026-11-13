@@ -1,0 +1,114 @@
+import type { Request as WorkerRequest } from "@cloudflare/workers-types";
+import { verifyCollectorToken, verifySession } from "./auth";
+import { handleIngest } from "./ingest";
+import { handleAuth } from "./routes/auth";
+import {
+  bootstrapResponse, collectorBootstrapResponse, noticeSeenResponse, syncStatusResponse,
+} from "./routes/bootstrap";
+import { handleCrud } from "./routes/crud";
+import type { CrudResource } from "./routes/crud";
+import { handleFiles } from "./routes/files";
+import { handleTimetable } from "./routes/timetable";
+import { json, notFound, unauthorized } from "./util";
+import type { Env } from "./types";
+
+const CRUD_RESOURCES = new Set([
+  "subjects", "tasks", "grades", "notes", "knowledge", "links",
+]);
+
+async function handleApi(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const method = request.method.toUpperCase();
+  const rest = url.pathname === "/api" ? "" : url.pathname.slice("/api/".length);
+  const segs = rest.split("/").filter(Boolean);
+  const head = segs[0] ?? "";
+  const parts = segs.slice(1);
+
+  if (!head) return notFound();
+
+  // 探活不含任何环境信息
+  if (head === "health" && parts.length === 0 && method === "GET") {
+    return json({ ok: true });
+  }
+
+  // status/setup/login 免鉴权：登录门控要先知道有没有设过密码。
+  // status 额外放行 GET，避免前端用 GET 时被 401 误判成「未登录」。
+  const publicAuth = head === "auth" && parts.length === 1 && (
+    (parts[0] === "status" && (method === "POST" || method === "GET")) ||
+    ((parts[0] === "setup" || parts[0] === "login") && method === "POST")
+  );
+  if (publicAuth) return handleAuth(request, env, parts, method);
+
+  // 采集器带自己的令牌，不走会话
+  if (head === "ingest") return handleIngest(request, env, parts);
+
+  const sessionOk = await verifySession(request, env);
+  // 采集器只带令牌读学科与手工映射（collector 的 fetchSubjects / fetchBootstrapMap），
+  // 其中 /api/subjects 是必须项，401 会让整个采集流程直接抛错。这是鉴权白名单里
+  // 唯一的例外：仅这两个只读 GET 放行，其余接口仍一律要求会话。
+  const collectorRead = !sessionOk && method === "GET" && (
+    (head === "subjects" && parts.length === 0) ||
+    (head === "bootstrap" && parts.length === 0)
+  ) && verifyCollectorToken(request, env);
+  if (!sessionOk && !collectorRead) return unauthorized();
+
+  if (head === "auth") return handleAuth(request, env, parts, method);
+  if (CRUD_RESOURCES.has(head)) {
+    return handleCrud(request, env, head as CrudResource, parts, method, url);
+  }
+  if (head === "timetable") return handleTimetable(request, env, parts, method);
+  if (head === "files") return handleFiles(request, env, parts, method, url);
+
+  if (head === "bootstrap" && parts.length === 0 && method === "GET") {
+    // 令牌路径只回手工映射，不把课表、外链与登录状态交给令牌持有者
+    return sessionOk ? bootstrapResponse(env) : collectorBootstrapResponse(env);
+  }
+  if (head === "sync" && parts.length === 1 && parts[0] === "status" && method === "GET") {
+    return syncStatusResponse(env);
+  }
+  if (head === "settings" && parts.length === 1 && parts[0] === "notice-seen" && method === "POST") {
+    return noticeSeenResponse(env);
+  }
+  // /api/* 未匹配一律返回 JSON 404，绝不落到静态资源
+  return notFound();
+}
+
+async function serveAsset(request: Request, env: Env): Promise<Response> {
+  // lib.dom 与 @cloudflare/workers-types 各声明了一套 Request/Response，
+  // ASSETS 绑定用的是后者；边界上做一次类型转换，运行时其实是同一个对象。
+  const resp = await env.ASSETS.fetch(request as unknown as WorkerRequest);
+  const pathname = new URL(request.url).pathname;
+  const last = pathname.split("/").pop() ?? "";
+  const dot = last.lastIndexOf(".");
+  const ext = dot > 0 ? last.slice(dot).toLowerCase() : "";
+  const htmlLike = ext === "" || ext === ".html" || ext === ".htm";
+  const isHtml = (resp.headers.get("content-type") || "").toLowerCase().includes("text/html");
+  // SPA fallback 会把未命中的路径也塞成 index.html（200 + text/html）。
+  // 带扩展名的资源（js/css/png/pdf…）必须返回真 404，否则手机端 <script>/<img>
+  // 会拿到一份 HTML，表现为白屏或解析错误（v1 教训、CF-05）。
+  if (!htmlLike && (resp.status === 404 || isHtml)) {
+    return new Response("Not Found", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  return resp as unknown as Response;
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    try {
+      const pathname = new URL(request.url).pathname;
+      // 先处理所有 /api/*，最后才回退静态资源（CF-05）
+      if (pathname === "/api" || pathname.startsWith("/api/")) {
+        return await handleApi(request, env);
+      }
+      return await serveAsset(request, env);
+    } catch (e) {
+      return json(
+        { error: "internal_error", message: e instanceof Error ? e.message : "unknown" },
+        500,
+      );
+    }
+  },
+};

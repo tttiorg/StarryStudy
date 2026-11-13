@@ -1,0 +1,34 @@
+{
+  "name": "starry-study",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "单用户、多端同步的学习工作台（Cloudflare Workers + D1 + R2）",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @starry/web",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy --config wrangler.local.toml",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:privacy": "node scripts/check-privacy.mjs",
+    "check": "npm run typecheck && npm run check:privacy",
+    "test": "npm test -w @starry/collector",
+    "smoke": "node scripts/smoke-test.mjs",
+    "db:migrate": "wrangler d1 migrations apply starry-study --local",
+    "db:migrate:remote": "wrangler d1 migrations apply starry-study --remote --config wrangler.local.toml",
+    "collect": "tsx packages/collector/src/index.ts",
+    "collect:dry": "tsx packages/collector/src/index.ts --dry-run",
+    "desktop": "tsx packages/desktop/src/index.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251112.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.90.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

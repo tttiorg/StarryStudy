@@ -1,0 +1,303 @@
+/* 全局布局与可复用原子类。组件特有的样式仍写在各自的 <style scoped> 里。 */
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  /* 移动端地址栏会顶掉静态视口高度的一截，这里用动态视口高度（FE-06） */
+  height: 100dvh;
+}
+
+#app {
+  overflow: hidden;
+}
+
+.app-shell {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.main-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* ---------- 卡片 / 面板 ---------- */
+.ss-card {
+  background: var(--ss-surface);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius);
+  padding: 18px;
+}
+
+.ss-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--ss-surface);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius);
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.ss-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--ss-border);
+  flex: none;
+}
+
+.ss-panel-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.ss-panel-sub {
+  font-size: 11.5px;
+  color: var(--ss-muted);
+  white-space: nowrap;
+}
+
+.ss-panel-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+/* 三列布局里不能写死 max-height：列高由 align-items:stretch 决定，
+   内容多寡交给 panel-body 自己滚动（FE-03）。 */
+.ss-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
+}
+
+.ss-empty {
+  color: var(--ss-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 26px 0;
+}
+
+.ss-hint {
+  color: var(--ss-muted);
+  font-size: 12.5px;
+  margin: 0 0 12px;
+}
+
+.ss-muted {
+  color: var(--ss-muted);
+}
+
+.ss-dim {
+  color: var(--ss-dim);
+}
+
+.ss-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--ss-border);
+  border-radius: 7px;
+  font-size: 11.5px;
+  color: var(--ss-text-2);
+  background: var(--ss-surface-2);
+  text-decoration: none;
+}
+
+.ss-tag.accent {
+  color: var(--ss-accent);
+  border-color: color-mix(in srgb, var(--ss-accent) 40%, transparent);
+  background: var(--ss-accent-soft);
+}
+
+.ss-tag.warn {
+  color: var(--ss-warn);
+  background: color-mix(in srgb, var(--ss-warn) 12%, transparent);
+}
+
+.ss-tag.danger {
+  color: var(--ss-danger);
+}
+
+.ss-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+
+/* ---------- 按钮 ---------- */
+.ss-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ss-border);
+  background: transparent;
+  color: var(--ss-text-2);
+  font-size: 12.5px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex: none;
+}
+
+.ss-btn:hover:not(:disabled) {
+  border-color: var(--ss-accent);
+  color: var(--ss-accent);
+}
+
+.ss-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ss-btn.primary {
+  border-color: color-mix(in srgb, var(--ss-accent) 45%, transparent);
+  color: var(--ss-accent);
+  background: var(--ss-accent-soft);
+  font-weight: 600;
+}
+
+.ss-btn.danger {
+  color: var(--ss-danger);
+  border-color: color-mix(in srgb, var(--ss-danger) 40%, transparent);
+}
+
+.ss-btn.danger:hover:not(:disabled) {
+  border-color: var(--ss-danger);
+  color: var(--ss-danger);
+  background: color-mix(in srgb, var(--ss-danger) 14%, transparent);
+}
+
+.ss-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ss-border);
+  background: transparent;
+  color: var(--ss-text);
+  font-size: 12.5px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex: none;
+}
+
+.ss-icon-btn:hover {
+  border-color: var(--ss-accent);
+  color: var(--ss-accent);
+}
+
+.ss-add {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--ss-border);
+  background: transparent;
+  color: var(--ss-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex: none;
+  font-family: inherit;
+}
+
+.ss-add:hover:not(:disabled) {
+  border-color: var(--ss-accent);
+  color: var(--ss-accent);
+  background: var(--ss-accent-soft);
+}
+
+.ss-add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- 分段标签 ---------- */
+.ss-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ss-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ss-muted);
+  font-size: 12.5px;
+  padding: 3px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.ss-tabs button:hover {
+  color: var(--ss-text);
+  background: var(--ss-surface-2);
+}
+
+.ss-tabs button.on {
+  background: var(--ss-surface-2);
+  border-color: var(--ss-border);
+  color: var(--ss-text);
+  font-weight: 600;
+}
+
+.ss-tabs button b {
+  color: var(--ss-warn);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+/* ---------- 路由转场 ---------- */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.14s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 700px) {
+  .content {
+    padding: 12px 10px 20px;
+  }
+  .ss-card {
+    padding: 14px 12px;
+  }
+}

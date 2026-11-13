@@ -1,0 +1,153 @@
+/* 深色/浅色两套变量。配色沿用 v1：底 #13191c、卡面 #1a2226、正文 #e7eceb、
+   次要 #a5b0b3、主色青 #12ccd8、危险 #d86a52、警告 #d3b26a、成功 #5fc79a。
+   Element Plus 的 --el-* 覆盖必须放在它自己的 dark/css-vars.css 之后引入。 */
+:root,
+html.dark {
+  color-scheme: dark;
+  --ss-bg: #13191c;
+  --ss-surface: #1a2226;
+  --ss-surface-2: #1d272b;
+  --ss-surface-3: #202a2f;
+  --ss-border: rgba(255, 255, 255, 0.08);
+  --ss-border-strong: rgba(255, 255, 255, 0.14);
+  --ss-text: #e7eceb;
+  --ss-text-2: #d2dada;
+  --ss-muted: #a5b0b3;
+  --ss-dim: #89979d;
+  --ss-accent: #12ccd8;
+  --ss-accent-ink: #2ce2e8;
+  --ss-accent-soft: rgba(18, 204, 216, 0.12);
+  --ss-danger: #d86a52;
+  --ss-warn: #d3b26a;
+  --ss-ok: #5fc79a;
+  --ss-radius: 14px;
+  --ss-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --ss-scrollbar: rgba(255, 255, 255, 0.14);
+  --ss-scrollbar-hover: rgba(255, 255, 255, 0.22);
+}
+
+html.light {
+  color-scheme: light;
+  --ss-bg: #f5f6f6;
+  --ss-surface: #ffffff;
+  --ss-surface-2: #f2f4f5;
+  --ss-surface-3: #e8ecee;
+  --ss-border: rgba(18, 28, 34, 0.1);
+  --ss-border-strong: rgba(18, 28, 34, 0.2);
+  --ss-text: #16212a;
+  --ss-text-2: #33414c;
+  --ss-muted: #64727c;
+  --ss-dim: #7d8b95;
+  --ss-accent: #0e94a0;
+  --ss-accent-ink: #0b7f8a;
+  --ss-accent-soft: rgba(14, 148, 160, 0.1);
+  --ss-danger: #c1513a;
+  --ss-warn: #99761f;
+  --ss-ok: #2c8f68;
+  --ss-shadow: 0 10px 30px rgba(16, 32, 40, 0.12);
+  --ss-scrollbar: rgba(18, 28, 34, 0.16);
+  --ss-scrollbar-hover: rgba(18, 28, 34, 0.26);
+}
+
+html.dark {
+  --el-color-primary: #12ccd8;
+  --el-color-primary-light-3: #3ddbe4;
+  --el-color-primary-light-5: #6ee6ec;
+  --el-color-primary-light-7: #0a9fa9;
+  --el-color-primary-light-9: rgba(18, 204, 216, 0.18);
+  --el-color-danger: #d86a52;
+  --el-color-success: #5fc79a;
+  --el-color-warning: #d3b26a;
+  --el-bg-color: #1a2226;
+  --el-bg-color-page: #13191c;
+  --el-bg-color-overlay: #202a2f;
+  --el-fill-color-blank: #1a2226;
+  --el-fill-color-light: #1d272b;
+  --el-fill-color: #1d272b;
+  --el-fill-color-dark: #202a2f;
+  --el-border-color: rgba(255, 255, 255, 0.1);
+  --el-border-color-light: rgba(255, 255, 255, 0.09);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.07);
+  --el-text-color-primary: #e7eceb;
+  --el-text-color-regular: #d2dada;
+  --el-text-color-secondary: #a5b0b3;
+  --el-text-color-placeholder: #89979d;
+  --el-mask-color: rgba(6, 10, 12, 0.72);
+  --el-box-shadow-light: 0 8px 26px rgba(0, 0, 0, 0.45);
+}
+
+html.light {
+  --el-color-primary: #0e94a0;
+  --el-color-primary-light-3: #3aacb6;
+  --el-color-primary-light-5: #6ec2ca;
+  --el-color-primary-light-7: #a9dade;
+  --el-color-primary-light-8: #cbe9ec;
+  --el-color-primary-light-9: #e6f4f5;
+  --el-color-primary-dark-2: #0b7f8a;
+  --el-color-danger: #c1513a;
+  --el-color-success: #2c8f68;
+  --el-color-warning: #99761f;
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f5f6f6;
+  --el-bg-color-overlay: #ffffff;
+  --el-fill-color-blank: #ffffff;
+  --el-fill-color-light: #f2f4f5;
+  --el-fill-color: #eef1f2;
+  --el-fill-color-dark: #e8ecee;
+  --el-border-color: rgba(18, 28, 34, 0.14);
+  --el-border-color-light: rgba(18, 28, 34, 0.11);
+  --el-border-color-lighter: rgba(18, 28, 34, 0.08);
+  --el-text-color-primary: #16212a;
+  --el-text-color-regular: #33414c;
+  --el-text-color-secondary: #64727c;
+  --el-text-color-placeholder: #8b979f;
+  --el-mask-color: rgba(240, 243, 244, 0.75);
+  --el-box-shadow-light: 0 8px 26px rgba(16, 32, 40, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--ss-bg);
+  color: var(--ss-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.62;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ss-scrollbar);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ss-scrollbar-hover);
+}
+
+.el-button,
+.el-input__inner,
+.el-textarea__inner {
+  font-size: 13.5px;
+}
+.el-dialog {
+  border-radius: 16px;
+  max-width: calc(100vw - 24px);
+}
+.el-dialog__title {
+  font-size: 15.5px;
+}
+.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-border-color: var(--ss-border);
+}

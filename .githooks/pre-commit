@@ -1,0 +1,7 @@
+#!/bin/sh
+# 提交前隐私自检。启用方式（在仓库根执行一次）：
+#   git config core.hooksPath .githooks
+# CI 里的「隐私自检」步骤调的是同一个脚本，本地与线上口径一致。
+set -e
+
+node scripts/check-privacy.mjs

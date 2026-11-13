@@ -1,0 +1,24 @@
+{
+  "name": "@starry/collector",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "本机 Blackboard 采集器：抓取成绩与日历，只通过 /api/ingest/* 写云端",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "collect": "tsx src/index.ts",
+    "test": "node --import tsx --test tests/parse.test.ts tests/plan.test.ts tests/ingest.test.ts tests/startup.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@starry/shared": "2.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
