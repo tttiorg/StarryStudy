@@ -1,5 +1,9 @@
 # StarryStudy
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](https://nodejs.org/)
+[![CI](https://github.com/tttiorg/StarryStudy/actions/workflows/ci.yml/badge.svg)](https://github.com/tttiorg/StarryStudy/actions/workflows/ci.yml)
+
 一个**单用户、多端**的学习工作台。结构化数据放在 Cloudflare 边缘（Workers + D1），
 文件对象存放在 B2（Backblaze B2，S3 兼容 API），通过自购域名访问；电脑关机时手机、平板
 照样能读写。本机只保留一个采集器和一个可选的桌面启动器，不存任何业务数据副本。
@@ -46,7 +50,7 @@
 前置：Node 20+（CI 用 22）、一个能用的 npm。
 
 ```bash
-git clone <你的仓库地址> starry-study
+git clone https://github.com/tttiorg/StarryStudy.git starry-study
 cd starry-study
 npm i
 cp .env.example .env          # Windows 用 copy；按注释填本机采集器需要的值
@@ -100,6 +104,9 @@ starry-study/
 │  └─ SELF-HOSTING.md     别人怎么部署自己的一份
 ├─ .github/workflows/ci.yml
 ├─ .githooks/pre-commit
+├─ LICENSE                 MIT 许可证全文
+├─ CONTRIBUTING.md         贡献规范与提交前检查清单
+├─ SECURITY.md             安全漏洞私下报告方式
 ├─ .env.example            只有键名和注释，不含任何值
 ├─ .dev.vars.example       本地 wrangler dev 用的 secret 占位
 ├─ wrangler.toml           仅本地全零占位 ID，真实 ID 走 wrangler.local.toml
@@ -201,8 +208,9 @@ v1 的解析逻辑（尤其是 Blackboard 采集）只作为只读参考，不�
 
 ## 开源许可
 
-建议采用 **MIT** 许可。仓库当前**尚未包含 `LICENSE` 文件**，采用时请自行添加许可证全文，
-不要假设它已经存在。
+本仓库采用 **MIT License**，全文见 [`LICENSE`](LICENSE)。
+参与贡献前请阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)；安全漏洞请按
+[`SECURITY.md`](SECURITY.md) 私下报告，**不要开公开 issue**。
 
 ## 风格约定
 
