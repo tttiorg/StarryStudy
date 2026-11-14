@@ -1,14 +1,11 @@
 # 复制为 wrangler.local.toml 后填入自己的 ID；该文件已被 .gitignore 排除。
 # 使用时把 wrangler.toml 的内容合并进来，再补齐下面几项。
+# B2 不设 binding，5 个 B2_* 凭据走 Worker secret / .dev.vars，不写进本文件。
 
 # [[d1_databases]]
 # binding = "DB"
 # database_name = "starry-study"
 # database_id = "<D1 database_id>"
-
-# [[r2_buckets]]
-# binding = "BUCKET"
-# bucket_name = "<R2 bucket name>"
 
 # routes = [
 #   { pattern = "study.example.com/*", zone_name = "example.com" }

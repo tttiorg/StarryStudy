@@ -1,7 +1,7 @@
 # 自托管部署
 
 这份文档给「想部署自己一份」的人。全程用自己的域名、自己的 Cloudflare 账号、自己的 D1
-与 R2，凭据只放本地 / Worker Secret，不进仓库。`*.workers.dev` 子域在中国大陆被 DNS 污染，
+与 B2 桶，凭据只放本地 / Worker Secret，不进仓库。`*.workers.dev` 子域在中国大陆被 DNS 污染，
 **必须绑定自定义域名**，下面所有步骤都以此为前提。
 
 > 文中所有地址都是虚构示例：`study.example.com`（应用）、`example.com`（主域）。换成你
@@ -12,6 +12,7 @@
 - Node 20+（CI 用 22）、npm。
 - 一个自购域名。
 - 一个 Cloudflare 账号。
+- 一个 Backblaze B2 账号。
 
 ## 常用命令速查
 
@@ -46,47 +47,53 @@
 二选一，都只在你的本机终端执行，不进仓库：
 
 - `npx wrangler login`（浏览器授权）；或
-- 在终端配置 `CLOUDFLARE_API_TOKEN` 环境变量（ scopes 至少含 D1 / R2 / Workers 编辑与
-  `Account:Read`）。这个令牌以及后面要用到的**真实** `database_id`、桶名、`account_id` 都
-  属于私有部署参数，绝不写进公开的 `wrangler.toml`（那里只有一个占位值）或提交给 CI
-  （CF-11）。
+- 在终端配置 `CLOUDFLARE_API_TOKEN` 环境变量（ scopes 至少含 D1 / Workers 编辑与
+  `Account:Read`）。这个令牌以及后面要用到的**真实** `database_id`、`account_id`，还有 B2 的
+  桶名与 App Key，都属于私有部署参数，绝不写进公开的 `wrangler.toml`（那里只有一个占位值）
+  或提交给 CI（CF-11）。
 
-## 3. 创建 D1 数据库与 R2 桶
+## 3. 创建 D1 数据库与 B2 桶
+
+D1 用 Wrangler 建；B2 桶在 Backblaze B2 控制台创建（它不归 Cloudflare 管，没有对应的
+wrangler 命令）：
 
 ```bash
 npx wrangler d1 create starry-study        # 记下输出里的 database_id
-npx wrangler r2 bucket create <你的桶名>   # 记下桶名
 ```
 
-> 若要启用 >50MB 文件的 R2 预签名直链，还要在 Cloudflare 创建一个 R2 API Token，记下
-> `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME`。不用大
-> 文件直链的话这一组可以全部留空。
+在 Backblaze B2 控制台创建桶后，记下下面 5 个值，它们是 Worker 访问 B2 的全部凭据（示例
+值一律用占位，真实值只放本地 / Worker Secret）：
+
+- `B2_ENDPOINT`：S3 兼容 API 端点
+- `B2_REGION`：桶所在区域
+- `B2_KEY_ID`：应用密钥的 Key ID
+- `B2_APP_KEY`：应用密钥本身
+- `B2_BUCKET_NAME`：桶名
+
+> 大文件（>50MB）的预签名直链由 Worker 用 B2 的 SigV4 生成，不再依赖 Cloudflare 侧的对象
+> 存储 API Token；这 5 项凭据必须全部配置，没有「可选留空」一说。
 
 ## 4. 生成 `wrangler.local.toml`
 
 公开的 `wrangler.toml` 里 `[[d1_databases]]` 带了一个**全零占位 UUID**
-（`00000000-0000-0000-0000-000000000000`），`[[r2_buckets]]` 用了本地模拟桶名
-`starry-study-local`。它不含任何真实基础设施信息（CF-11），存在的原因是被 Wrangler 逼出来
-的：连 `--local` 都强制要求 `database_id` 字段存在，完全缺省时
-`wrangler d1 migrations apply --local` 会直接报「bindings must have a database_id field」，
-新人 clone 下来连迁移都跑不了。占位值让 `npm run dev` / `npm run db:migrate` 把本地 D1 落到
-`.wrangler/state`，开箱即用。
+（`00000000-0000-0000-0000-000000000000`），仅此一项占位，没有别的对象存储绑定。它不含任何
+真实基础设施信息（CF-11），存在的原因是被 Wrangler 逼出来的：连 `--local` 都强制要求
+`database_id` 字段存在，完全缺省时 `wrangler d1 migrations apply --local` 会直接报
+「bindings must have a database_id field」，新人 clone 下来连迁移都跑不了。占位值让
+`npm run dev` / `npm run db:migrate` 把本地 D1 落到 `.wrangler/state`，开箱即用。B2 桶
+不设 binding，5 个 `B2_*` 凭据也不写进这份文件，见第 5 步。
 
 **但线上部署绝不能用这个占位值。** 部署用的配置是 `wrangler.local.toml`（已被 `.gitignore`
 排除）：把 `wrangler.toml` 的内容完整复制成 `wrangler.local.toml`（仓库里也有
-`wrangler.local.toml.example` 作格式参照），再**覆盖**下面三项为第 3 步创建出来的真实值。
-不覆盖的话，`npm run deploy` 与 `npm run db:migrate:remote` 会带着占位值连到错误的库 / 桶
-（或加载失败），数据写不到你自己的 D1 / R2：
+`wrangler.local.toml.example` 作格式参照），把 `database_id` 覆盖成第 3 步得到的真实值，
+再补上 `routes`。不覆盖的话，`npm run deploy` 与 `npm run db:migrate:remote` 会带着占位值
+连到错误的库（或加载失败），数据写不到你自己的 D1：
 
 ```toml
 [[d1_databases]]
 binding = "DB"
 database_name = "starry-study"
 database_id = "<第 3 步得到的 database_id>"
-
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "<第 3 步的桶名>"
 
 routes = [
   { pattern = "study.example.com/*", zone_name = "example.com" }
@@ -95,23 +102,24 @@ routes = [
 
 - `pattern` 是「主机名 + `/*`」，`zone_name` 是主域名（不含子域、不含 `/*`）。写错会 404
   且无提示（CF-10），且该 zone 必须已 Active。
-- 这里的 `database_id` / `bucket_name` **必须**覆盖掉 `wrangler.toml` 里的占位值；真实
-  `account_id` / `database_id` / 桶名绝不写进公开的 `wrangler.toml`（CF-11）。
-  `npm run deploy` 与 `npm run db:migrate:remote` 都带 `--config wrangler.local.toml`，
-  会自动读这份本地配置。
+- 这里的 `database_id` **必须**覆盖掉 `wrangler.toml` 里的占位值；真实 `account_id` /
+  `database_id` 绝不写进公开的 `wrangler.toml`（CF-11）。B2 的桶名与 App Key 走第 5 步的
+  Worker Secret，同样不进任何文件。`npm run deploy` 与 `npm run db:migrate:remote` 都带
+  `--config wrangler.local.toml`，会自动读这份本地配置。
 
 ## 5. 设置 Worker Secret
 
 ```bash
 npx wrangler secret put AUTH_SECRET              # 会话签名密钥，粘贴一段随机长字符串
 npx wrangler secret put AUTH_COLLECTOR_TOKEN     # 采集器令牌，与本机 .env 的 COLLECTOR_TOKEN 一致
+npx wrangler secret put NOTICE_WEBHOOK_URL       # 可选：企业微信群机器人 webhook，不做邮件
 
-# 可选：通知与 R2 预签名直链，不用的话可以不设
-npx wrangler secret put NOTICE_WEBHOOK_URL       # 企业微信群机器人 webhook，不做邮件
-npx wrangler secret put R2_ACCOUNT_ID
-npx wrangler secret put R2_ACCESS_KEY_ID
-npx wrangler secret put R2_SECRET_ACCESS_KEY
-npx wrangler secret put R2_BUCKET_NAME
+# Worker 通过 S3 兼容 API 访问 B2，以下 5 项必须配置
+npx wrangler secret put B2_ENDPOINT
+npx wrangler secret put B2_REGION
+npx wrangler secret put B2_KEY_ID
+npx wrangler secret put B2_APP_KEY
+npx wrangler secret put B2_BUCKET_NAME
 ```
 
 这些值只存在 Cloudflare 的 Secret 里。本地 `wrangler dev` 若要用，复制
@@ -169,11 +177,11 @@ npm run collect               # 正式采集，POST /api/ingest/*
 | CF-01 | 免费版每次调用 CPU 上限 10ms（wall time 不限，等 I/O 不算） | 密码哈希是最重的计算，PBKDF2 十万次迭代约几十毫秒会直接 1102。本项目默认 1 万次（`PBKDF2_ITERATIONS` 可调），先用 `wrangler tail` 量，超了再降或改用 Cloudflare Access |
 | CF-02 | D1 没有长事务，跨语句不保证原子 | 一次请求内的多条写用 `db.batch([...])`，它在一个事务里执行 |
 | CF-03 | 免费版每天 10 万次请求、D1 10 万行写 | 笔记自动保存必须防抖 800ms，且只写变化的那一条；不要让前端定时全量 PUT |
-| CF-04 | 请求体上限（免费 100MB） | >50MB 走 R2 预签名直传（`POST /api/files/:id/presign`），不要经过 Worker |
+| CF-04 | 请求体上限（免费 100MB） | >50MB 走 B2 预签名直传（`POST /api/files/:id/presign`），由 Worker 用 SigV4 生成直链，不要经过 Worker |
 | CF-05 | 静态资源与 API 同域时，SPA fallback 会吃掉 `/api/*` | Worker 里**先**处理 `/api/*`，最后才回退 `index.html`；`not_found_handling = "single-page-application"` 只在静态资源绑定上生效，别指望它兜 API |
 | CF-06 | 时区。`new Date()` 在 Worker 里是 UTC，D1 的 `datetime('now')` 也是 UTC | 所有「今天 / 本周 / 逾期」判断显式转 Asia/Shanghai，统一走 `shared/time.ts` 的 `todayInTZ()`，业务代码禁止直接 `new Date()` |
-| CF-07 | R2 的 Range 要自己实现 | `env.BUCKET.get(key, { range })` 后手动返回 `206` + `Content-Range` + `Accept-Ranges: bytes`；不做的话安卓 Edge 的 PDF 阅读器翻不了页 |
-| CF-08 | ETag | 用 `object.httpEtag`（带引号，直接用）与 `If-None-Match` 比对，命中返回 `304` 且无 body |
+| CF-07 | B2 的 Range 要自己实现 | 通过 B2 的 S3 兼容 API 发起带 Range 的 GET，手动返回 `206` + `Content-Range` + `Accept-Ranges: bytes`；不做的话安卓 Edge 的 PDF 阅读器翻不了页 |
+| CF-08 | ETag | 用 B2 返回的 ETag（带引号，直接用）与 `If-None-Match` 比对，命中返回 `304` 且无 body |
 | CF-09 | `wrangler dev` 的本地 D1 与线上行为有差异 | 每次迁移后至少跑一次 `--remote`（见第 6 步） |
 | CF-10 | 自定义域名的路由写错会 404 且无提示 | `routes = [{ pattern = "study.example.com/*", zone_name = "example.com" }]`，zone 必须已 Active |
 | CF-11 | 不要把**真实** `account_id` / `database_id` / 桶名写进公开的 `wrangler.toml` | 公开文件只留全零占位 ID；真实值放 `wrangler.local.toml`（已 gitignore）或 CI Secret，并在部署时覆盖占位值（见第 4 步） |
@@ -186,7 +194,7 @@ npm run collect               # 正式采集，POST /api/ingest/*
 | Workers CPU | 每次调用 10ms（wall time 不限） |
 | Workers 请求体 | 100MB（>50MB 文件走预签名直传绕开） |
 | D1 | 5GB 存储、每天 10 万行写 |
-| R2 | 10GB 存储、出站流量不计费 |
+| B2 | 10GB 存储，下载有每日免费额度、超出按流量计费 |
 
 个人单用户用量远在这些额度内。笔记防抖、按条写、内容寻址去重、304 缓存都是为了别把
 请求数浪费在全量提交上。Cloudflare 边缘比原云主机慢一个量级，但对 1–2MB 的 PDF 与文本

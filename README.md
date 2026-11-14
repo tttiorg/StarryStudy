@@ -1,8 +1,8 @@
 # StarryStudy
 
-一个**单用户、多端**的学习工作台。数据只放在 Cloudflare 边缘（Workers + D1 + R2），
-通过自购域名访问；电脑关机时手机、平板照样能读写。本机只保留一个采集器和一个可选的
-桌面启动器，不存任何业务数据副本。
+一个**单用户、多端**的学习工作台。结构化数据放在 Cloudflare 边缘（Workers + D1），
+文件对象存放在 B2（Backblaze B2，S3 兼容 API），通过自购域名访问；电脑关机时手机、平板
+照样能读写。本机只保留一个采集器和一个可选的桌面启动器，不存任何业务数据副本。
 
 > 这套东西替代的是「教务系统 + Blackboard + 一堆表格便签 + 网盘」：Blackboard 上的作业与
 > 成绩自动进来，主页告诉你今天要交什么，学科页汇总一门课的成绩、资料、笔记，资料里的
@@ -13,7 +13,7 @@
 - **单用户**。永远只有一个账号，没有注册、没有权限体系，也没有为「以后支持多人」预留的设计。
 - **多端同一份数据**。电脑（Windows，主力）、手机（安卓 Edge）、平板走同一个网址、同一套
   API；云端是唯一数据源（single source of truth），本地不再存业务数据。
-- **Cloudflare 边缘 + 自有域名**。D1 存结构化数据，R2 存文件对象，Worker 同时托管静态资源
+- **Cloudflare 边缘 + B2 + 自有域名**。D1 存结构化数据，B2 存文件对象，Worker 同时托管静态资源
   与 REST API。
 - **不做的事**：移动端原生 App（用浏览器 PWA）、实时协同推送、离线优先、邮件通知。刷新或
   手动重新拉取即可拿到最新数据。
@@ -55,13 +55,15 @@ npm run build                 # 构建前端到 packages/web/dist
 npm run dev                   # 构建 + wrangler dev，本地起在 http://localhost:8787
 ```
 
-`npm run dev` 用的是本地模拟的 D1 与 R2，不连线上库。浏览器打开
+`npm run dev` 用的是本地模拟的 D1，不连线上库；对象存储改走 B2 的 S3 兼容 API，本地也要在
+`.dev.vars` 里配齐 5 个 `B2_*` 变量（见 `.dev.vars.example`）。浏览器打开
 `http://localhost:8787` 即可看到界面（首次会要求设置密码）。
 
-`wrangler.toml` 里的 `database_id` 是全零占位 UUID、`bucket_name` 是本地模拟桶名：Wrangler
-连 `--local` 都强制要求 `database_id` 存在，缺了会拒绝加载配置，占位值只为让本地迁移 / 开发
-开箱即用，**不是任何真实基础设施信息**。线上部署必须在 `wrangler.local.toml`（已 gitignore）
-里覆盖成真实 ID 与桶名，详见 `docs/ARCHITECTURE.md` §3.1 与 `docs/SELF-HOSTING.md` §4。
+`wrangler.toml` 里的 `database_id` 是全零占位 UUID：Wrangler 连 `--local` 都强制要求
+`database_id` 存在，缺了会拒绝加载配置，占位值只为让本地迁移 / 开发开箱即用，**不是任何真实
+基础设施信息**。线上部署必须在 `wrangler.local.toml`（已 gitignore）里把 `database_id` 覆盖成
+真实值；B2 桶没有 binding，5 个 `B2_*` 凭据走 Worker secret / `.dev.vars`，不写进 `wrangler.toml`，
+详见 `docs/ARCHITECTURE.md` §3.1 与 `docs/SELF-HOSTING.md` §4。
 
 注意两份本机配置各管各的：`.env` 给采集器读（本机 Node 进程），`.dev.vars` 给本地
 `wrangler dev` 的 Worker 读（复制 `.dev.vars.example` 填写，键名与线上 Secret 一致）；
@@ -126,7 +128,7 @@ starry-study/
 | `npm run collect:dry` | 采集器 `--dry-run`，只看要写什么、不落库 |
 | `npm run desktop` | 起浏览器全屏窗口（需传 `--url`） |
 
-部署侧还有 `wrangler secret put <NAME>`、`wrangler r2 object put` 等 Wrangler 原生命令，
+部署侧还有 `wrangler secret put <NAME>` 等 Wrangler 原生命令，
 完整流程见 `docs/SELF-HOSTING.md`。
 
 ## 隐私边界
@@ -137,7 +139,7 @@ starry-study/
 
 | 类别 | 内容 |
 |---|---|
-| 凭据 | 学校账号口令、采集器令牌、Cloudflare API Token、真实 D1 `database_id`、R2 桶名、`AUTH_SECRET`（`wrangler.toml` 里的全零占位 ID 不属此类） |
+| 凭据 | 学校账号口令、采集器令牌、Cloudflare API Token、真实 D1 `database_id`、B2 桶名与 App Key、`AUTH_SECRET`（`wrangler.toml` 里的全零占位 ID 不属此类） |
 | 身份 | 真实姓名、学号、班级 |
 | 学业 | 真实成绩、真实课程名与代码、作业标题、教师姓名 / 邮箱 / 电话 |
 | 基础设施 | 服务器 IP、密钥路径、隧道域名、自定义域名本身 |
@@ -166,7 +168,7 @@ data/ *.sqlite backups/ shots/ *.log .workbuddy/` 等。提交前跑 `npm run ch
 | # | 验证点 | 对应实现 / 命令 | 是否要真机 |
 |---|---|---|---|
 | 1 | 关机后手机 4G 能登录、看课表、写笔记 | Worker + D1 同源 API、`/api/bootstrap` | 手机 + 4G |
-| 2 | 手机上传图、电脑改名互见 | R2 `blob/<sha前2位>/<sha>` + 文件元数据软更新 | 手机 + 电脑 |
+| 2 | 手机上传图、电脑改名互见 | B2 `blob/<sha前2位>/<sha>` + 文件元数据软更新 | 手机 + 电脑 |
 | 3 | 手机 Edge 内嵌渲染 PDF、能翻页 | `GET /api/files/:id/raw` 的 Range / 206 / ETag | 手机 |
 | 4 | 课表改一格只提交一格 | `PUT /api/timetable/slot`，DevTools 看只有一个 PUT | 电脑 |
 | 5 | 采集器跑一次，今日作业出现且 done 与 BB 一致 | `npm run collect`、`/api/ingest/*` | 电脑 + 学校账号 |
@@ -183,7 +185,7 @@ data/ *.sqlite backups/ shots/ *.log .workbuddy/` 等。提交前跑 `npm run ch
 
 ## 部署与迁移
 
-- 别人部署自己一份：见 `docs/SELF-HOSTING.md`（买域名、建 D1/R2、填
+- 别人部署自己一份：见 `docs/SELF-HOSTING.md`（买域名、建 D1 与 B2 桶、填
   `wrangler.local.toml`、设 secret、迁移、部署、本机配采集器）。
 - 从 v1 搬数据：用 `node scripts/migrate-v1.mjs --data <v1 数据目录>` 生成一次性 SQL 与
   待上传文件清单，脚本只读 v1、不连线上库、不打印任何真实姓名 / 课程名（只打印条数），

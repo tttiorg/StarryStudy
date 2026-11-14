@@ -92,7 +92,7 @@ const SKIP = new Set([
   "updatedAt",
   "deletedAt",
   "srcKey",
-  "r2Key",
+  "objectKey",
   "sha256",
   "size",
   "mime",

@@ -121,13 +121,13 @@ API 用 `camelCase`，转换只在 Worker 的 `db.ts` 里做一次（`packages/s
 `deleted_at`。可拖拽排序，抓 favicon。示例种子只保留 2 个通用示例链接（`example.com` /
 `example.org`），其余让用户自己加。
 
-### files 文件（对象在 R2）
+### files 文件（对象在 B2）
 
 | 字段 | 类型 / 默认 | 说明 |
 |---|---|---|
 | `id` | TEXT PK | `f_` 前缀 |
-| `name` | TEXT NOT NULL | 显示名，改名不影响 R2 对象 |
-| `r2_key` | TEXT NOT NULL | `blob/<sha256前2位>/<sha256>` |
+| `name` | TEXT NOT NULL | 显示名，改名不影响 B2 对象 |
+| `object_key` | TEXT NOT NULL | `blob/<sha256前2位>/<sha256>` |
 | `size` / `mime` / `sha256` | | 内容寻址元信息 |
 | `subject_id` | TEXT NULL | |
 | `category` | TEXT DEFAULT `material` | `material / knowledge` |
@@ -165,7 +165,7 @@ API 用 `camelCase`，转换只在 Worker 的 `db.ts` 里做一次（`packages/s
 前缀常量在 `packages/shared/src/constants.ts` 的 `ID_PREFIX`，生成在 `ids.ts` 的 `newId()`。
 v1 课表用过 `t_`，但 v2 的 `timetable_slots` 主键是 `(day, block)`、不带 id，故不再使用。
 
-## 4. R2 key 布局与去重 / 软删
+## 4. B2 对象 key 布局与去重 / 软删
 
 ```
 blob/<sha256[0:2]>/<sha256>
@@ -177,7 +177,7 @@ blob/<sha256[0:2]>/<sha256>
   `files` 行里改。
 - **上传流程**：算 sha256 → 对 `blob/<sha前2位>/<sha>` 做 `HEAD` 命中则直接复用该 key →
   否则 `PUT`。`sha256` 列有唯一索引，重复内容不会重复存对象。
-- **删除**：只软删 `files` 行（`deleted_at` 置值），R2 对象保留等 GC；免费额度宽，暂时不 GC
+- **删除**：只软删 `files` 行（`deleted_at` 置值），B2 对象保留等 GC；免费额度宽，暂时不 GC
   也没关系。绝不做物理移动。
 - **local_only**：`local_only=1` 的行不上传、不参与 sha 去重，手机端显示「仅电脑可用」且
   不可点开。迁移脚本对 `link:true` 的 v1 条目直接置 `local_only=1`。

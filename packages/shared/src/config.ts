@@ -22,6 +22,16 @@ export interface CollectorConfig {
   token: string;
 }
 
+// B2 走 S3 兼容 API 而不是 Worker binding：五项缺一不可，
+// 缺了 createStorage 会明确返回 null，由接口回 503 而不是抛 500。
+export interface StorageConfig {
+  endpoint: string;
+  region: string;
+  keyId: string;
+  appKey: string;
+  bucketName: string;
+}
+
 export interface WorkerConfig {
   authSecret: string;
   collectorToken: string;
@@ -29,6 +39,7 @@ export interface WorkerConfig {
   pbkdf2Iterations: number;
   sessionTtlDays: number;
   presignThresholdBytes: number;
+  storage: StorageConfig;
 }
 
 export interface AppConfig {
@@ -84,6 +95,13 @@ export function readConfig(raw: EnvSource): AppConfig {
       pbkdf2Iterations: num(raw, "PBKDF2_ITERATIONS", 10_000),
       sessionTtlDays: num(raw, "SESSION_TTL_DAYS", SESSION_TTL_DAYS),
       presignThresholdBytes: num(raw, "PRESIGN_THRESHOLD_BYTES", PRESIGN_THRESHOLD_BYTES),
+      storage: {
+        endpoint: v(raw, "B2_ENDPOINT").replace(/^https?:\/\//, "").replace(/\/$/, ""),
+        region: v(raw, "B2_REGION"),
+        keyId: v(raw, "B2_KEY_ID"),
+        appKey: v(raw, "B2_APP_KEY"),
+        bucketName: v(raw, "B2_BUCKET_NAME"),
+      },
     },
   };
 }

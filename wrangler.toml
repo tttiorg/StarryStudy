@@ -10,23 +10,20 @@ directory = "packages/web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# 下面两段用的是「本地占位值」，不是任何真实基础设施信息：
+# 下面用的是「本地占位值」，不是任何真实基础设施信息：
 # Wrangler 连 --local 都要求 database_id 存在，缺了会直接拒绝加载配置，
 # 新人 clone 下来连迁移都跑不了。全零 UUID 让本地 D1 落到 .wrangler/state，
-# 线上真实 database_id / 桶名只放 wrangler.local.toml（已 gitignore）或 CI secret（CF-11）。
+# 线上真实 database_id 只放 wrangler.local.toml（已 gitignore）或 CI secret（CF-11）。
+# 对象存储走 B2 的 S3 兼容 API，不需要任何 binding，也就没有占位桶名。
 [[d1_databases]]
 binding = "DB"
 database_name = "starry-study"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "starry-study-local"
-
 # 部署前请复制本文件为 wrangler.local.toml，补上：
 #   [[d1_databases]] database_id = "<创建 D1 后得到的 ID>"
-#   [[r2_buckets]]   bucket_name = "<你的桶名>"
-#   routes = [{ pattern = "study.example.com/*", zone_name = "example.com" }]
+#   routes = [{ pattern = "study.example.com", custom_domain = true }]
 # 然后用 npm run deploy（它带 --config wrangler.local.toml）。
+# B2 的 5 项凭据用 wrangler secret put 写入，不进任何配置文件。
 # workers.dev 子域在中国大陆被 DNS 污染，不要把它写进任何默认配置。

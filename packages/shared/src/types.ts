@@ -130,8 +130,8 @@ export interface Link extends BaseRecord {
 }
 
 export interface StudyFile extends BaseRecord {
-  name: string;             // 显示名，改动不影响 R2 对象
-  r2Key: string;            // blob/<sha256前2位>/<sha256>
+  name: string;             // 显示名，改动不影响 B2 对象
+  objectKey: string;        // blob/<sha256前2位>/<sha256>
   size: number;
   mime: string;
   sha256: string;

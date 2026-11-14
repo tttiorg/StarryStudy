@@ -3,7 +3,7 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
-  "description": "单用户、多端同步的学习工作台（Cloudflare Workers + D1 + R2）",
+  "description": "单用户、多端同步的学习工作台（Cloudflare Workers + D1 + B2）",
   "workspaces": [
     "packages/*"
   ],

@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS links (
 CREATE TABLE IF NOT EXISTS files (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
-  r2_key     TEXT NOT NULL,
+  object_key TEXT NOT NULL,
   size       INTEGER NOT NULL,
   mime       TEXT NOT NULL,
   sha256     TEXT NOT NULL,

@@ -2,8 +2,9 @@
 
 ## 1. 形态与数据流
 
-v2 是「Cloudflare 边缘 + D1 + R2 + 自有域名」，本机只负责采集。**云端是唯一数据源**
-（single source of truth），本地不再存业务数据副本；电脑关机时手机、平板照样能读写。
+v2 是「Cloudflare 边缘 + D1 + B2（Backblaze B2，S3 兼容 API）+ 自有域名」，本机只负责采集。
+**云端是唯一数据源**（single source of truth），本地不再存业务数据副本；电脑关机时手机、
+平板照样能读写。
 
 ```mermaid
 flowchart LR
@@ -17,13 +18,15 @@ flowchart LR
   subgraph Cloudflare（自有域名 + 边缘）
     W[Worker<br/>静态资源 + REST API]
     D1[(D1：结构化数据)]
-    R2[(R2：文件对象)]
+  end
+  subgraph Backblaze
+    B2[(B2：文件对象<br/>S3 兼容 API)]
   end
   C -->|POST /api/ingest/*<br/>带 X-Collector-Token| W
   D -->|同源 HTTPS| W
   M -->|同源 HTTPS| W
   W --> D1
-  W --> R2
+  W -->|S3 兼容 API| B2
 ```
 
 三个终端：
@@ -50,7 +53,7 @@ flowchart LR
 | 家里常开一台机器 + 内网穿透（Tunnel） | 代码几乎不用改，但需要一台 7×24 设备、耗电、断电断网就全挂，直接违反「电脑关机手机也能用」 |
 | Supabase 免费版 | 库与存储额度偏小，用户资料会到 1–2GB，直接超 |
 | Vercel + 外部数据库 | 静态 + Serverless 可以，但文件存储还要另找，且境内访问不稳 |
-| **Cloudflare Workers + D1 + R2** | 免费额度够（D1 5GB / R2 10GB / 出站不计费），全球边缘，无需运维 |
+| **Cloudflare Workers + D1 + B2** | 免费额度够（D1 5GB / B2 10GB 存储，下载有每日免费额度），Worker 跑在全球边缘，无需运维 |
 
 `*.workers.dev` 子域在中国大陆被 DNS 污染（实测解析到无关地址段、直连超时），
 **所有部署必须绑自定义域名**，不要在默认配置或文档里假设它可用。Cloudflare 边缘比原
@@ -62,30 +65,31 @@ flowchart LR
 |---|---|---|
 | 域名 | 用户自购，NS 托管到 Cloudflare | `workers.dev` 不可用 |
 | 登录 | 自建：单账号 + 密码 + 签名 Cookie，不用 Cloudflare Access | Access 不支持 `workers.dev`，且自建能保持「单账号」模型 |
-| 文件下载 | 默认 Worker 代理转发；单文件 >50MB 才返回 R2 预签名直链 | 代理能逐请求校验权限；大文件才需要绕开 Worker 请求数 |
+| 文件下载 | 默认 Worker 代理转发；单文件 >50MB 才返回 B2 预签名直链（Worker 用 SigV4 生成） | 代理能逐请求校验权限；大文件才需要绕开 Worker 请求数 |
 | 缓存头 | `Cache-Control: private, max-age=0` + `ETag`，命中返回 304 | 既不浪费流量，也不会让手机看到旧版本 |
 | 写入冲突 | 每条记录带 `rev`，提交带上，不匹配返回 409 | 见 §5 |
 | 通知 | 企业微信群机器人 webhook（**不做邮件**） | 邮件需要第三方 API + 发件人验证；webhook 一个 POST 就够，境内直连 |
 | 前端 | Vue 3 + Vite + Vue Router + Pinia + Element Plus | 沿用既有 UI 习惯 |
 
-实现落点：`wrangler.toml` 绑定 `ASSETS`（静态）、`DB`（D1）、`BUCKET`（R2）；
-`packages/shared/src/constants.ts` 定义 `PRESIGN_THRESHOLD_BYTES = 50MB`、
-`SESSION_COOKIE = "sid"`、`SESSION_TTL_DAYS = 30` 等；`config.ts` 是唯一读取环境的出口。
+实现落点：`wrangler.toml` 只绑定 `ASSETS`（静态）与 `DB`（D1），B2 不设 binding，由 Worker
+凭 5 个 `B2_*` 环境变量通过 S3 兼容 API 访问；`packages/shared/src/constants.ts` 定义
+`PRESIGN_THRESHOLD_BYTES = 50MB`、`SESSION_COOKIE = "sid"`、`SESSION_TTL_DAYS = 30` 等；
+`config.ts` 是唯一读取环境的出口。
 
 ### 3.1 本地占位 ID 与线上覆盖
 
 `wrangler.toml` 里 `[[d1_databases]]` 的 `database_id` 是一个**全零占位 UUID**
-`00000000-0000-0000-0000-000000000000`，`[[r2_buckets]]` 的 `bucket_name` 是本地模拟桶名
-`starry-study-local`。这不是任何真实基础设施信息，而是被 Wrangler 逼出来的：连 `--local`
-都强制要求 `database_id` 字段存在，完全缺省时 `wrangler d1 migrations apply --local` 会直接
-拒绝加载配置，新人 clone 下来连迁移都跑不了。占位值让本地 D1 落到 `.wrangler/state`，
-`wrangler dev` / `npm run db:migrate` 开箱即用。
+`00000000-0000-0000-0000-000000000000`。这不是任何真实基础设施信息，而是被 Wrangler 逼出来
+的：连 `--local` 都强制要求 `database_id` 字段存在，完全缺省时 `wrangler d1 migrations apply
+--local` 会直接拒绝加载配置，新人 clone 下来连迁移都跑不了。占位值让本地 D1 落到
+`.wrangler/state`，`wrangler dev` / `npm run db:migrate` 开箱即用。B2 没有 binding，桶名与
+App Key 不出现在 `wrangler.toml`，只走 Worker secret / `.dev.vars`。
 
-**线上部署必须在 `wrangler.local.toml`（已 gitignore）里覆盖 `database_id` 与 `bucket_name`**
-为创建出来的真实值，否则 `npm run deploy` / `npm run db:migrate:remote` 会带着占位值连到
-错误的库 / 桶（或加载失败），数据写不到自己的 D1 / R2。真实 `database_id`、桶名、
-`account_id` 绝不写进公开的 `wrangler.toml`（CF-11），只放 `wrangler.local.toml` 或 CI
-secret。两条迁移命令的分工：
+**线上部署必须在 `wrangler.local.toml`（已 gitignore）里把 `database_id` 覆盖成真实值**，
+否则 `npm run deploy` / `npm run db:migrate:remote` 会带着占位值连到错误的库（或加载失败），
+数据写不到自己的 D1。真实 `database_id`、`account_id` 绝不写进公开的 `wrangler.toml`
+（CF-11），只放 `wrangler.local.toml` 或 CI secret；B2 的 5 个凭据用 `wrangler secret put`
+设置，同样不进任何文件。两条迁移命令的分工：
 
 | 命令 | 目标 | 读哪份配置 |
 |---|---|---|
@@ -133,8 +137,8 @@ History 模式，断言 / 调试地址是 `/subjects/<id>` 而不是 `/#/subject
 （`packages/shared/src/utils.ts` 的 `timingSafeEqual`，自己实现长度检查 + 异或累加）。
 首次访问 `hash` 为空 → `needSetup` → 要求设置密码。
 
-**D1 / R2 分工**：D1 存全部结构化数据（学科、课表、任务、成绩、笔记、知识点、外链、
-文件元数据、`settings`、`sync_runs`、`auth`）；R2 只存文件对象，key 为内容寻址的
+**D1 / B2 分工**：D1 存全部结构化数据（学科、课表、任务、成绩、笔记、知识点、外链、
+文件元数据、`settings`、`sync_runs`、`auth`）；B2 只存文件对象，key 为内容寻址的
 `blob/<sha256前2位>/<sha256>`。结构化子对象（`course` / `faculty` / `tags` / `log`）用
 `TEXT` 存 JSON，不为它们建表。
 

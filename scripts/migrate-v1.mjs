@@ -1,21 +1,27 @@
 #!/usr/bin/env node
 // v1 -> v2 一次性导出脚本（交接书 §10.3）。
 //
-// 只做三件事：读 v1 数据目录里的 db/*.json，生成一份 D1 SQL，生成一份「文件 -> R2」待上传
+// 只做三件事：读 v1 数据目录里的 db/*.json，生成一份 D1 SQL，生成一份「文件 -> B2」待上传
 // 清单。它**只读** v1 目录，不修改 v1、不连接任何数据库、不上传任何文件；标准输出只打印
 // 逐集合条数，不打印任何真实姓名 / 课程名 / 成绩（产物文件里会有，但那是要落到 gitignore
 // 目录里供用户自己核对的，不进仓库）。
 //
 // 用法：
 //   node scripts/migrate-v1.mjs --data <v1 数据目录>
-//   node scripts/migrate-v1.mjs --data <v1 数据目录> --out <输出目录>
+//   node scripts/migrate-v1.mjs --archive <v1 备份 tgz>
+//   两者可再加 --out <输出目录>；--data 与 --archive 二选一。
 //
-// --data 没有默认值：绝不把真实本机路径写死在仓库里。它指向 v1 的「数据根目录」，
-// 其下有 db/*.json 与 files/（上传副本）。--out 默认是仓库里已被 gitignore 的
+// --data / --archive 都没有默认值：绝不把真实本机路径写死在仓库里。它们指向 v1 的
+// 「数据根目录」，其下有 db/*.json 与 files/（上传副本）。--archive 用系统 tar 解到系统临时
+// 目录，结束后立即删除，避免把真实数据留在工作区。--out 默认是仓库里已被 gitignore 的
 // data/migrations-output/，不要把它改到会被提交的位置。
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,16 +40,65 @@ function arg(name) {
 }
 
 const dataArg = arg("data");
-if (!dataArg) {
-  console.error("必须传入 --data <v1 数据目录>；该参数没有默认值，避免写死真实路径。");
-  console.error("用法：node scripts/migrate-v1.mjs --data <v1 数据目录> [--out <输出目录>]");
+const archiveArg = arg("archive");
+if (dataArg && archiveArg) {
+  console.error("--data 与 --archive 二选一，不要同时传。");
+  process.exit(1);
+}
+if (!dataArg && !archiveArg) {
+  console.error("必须传入 --data <v1 数据目录> 或 --archive <v1 备份 tgz>；两者都没有默认值，避免写死真实路径。");
+  console.error("用法：node scripts/migrate-v1.mjs (--data <目录> | --archive <tgz>) [--out <输出目录>]");
   process.exit(1);
 }
 
-const DATA = resolve(dataArg);
+// 备份包常套一层目录，向下最多找 3 层含 db/ 的那一层；不递归整盘扫描。
+function findDataRoot(root) {
+  let level = [root];
+  for (let depth = 0; depth < 3 && level.length; depth += 1) {
+    const next = [];
+    for (const dir of level) {
+      if (existsSync(join(dir, "db"))) return dir;
+      let entries = [];
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) if (e.isDirectory()) next.push(join(dir, e.name));
+    }
+    level = next;
+  }
+  return null;
+}
+
+let DATA;
+let cleanup = () => {};
+if (archiveArg) {
+  const archive = resolve(archiveArg);
+  if (!existsSync(archive)) {
+    console.error("找不到归档文件，请确认 --archive 指向的是存在的 .tgz / .tar.gz。");
+    process.exit(1);
+  }
+  const tmp = mkdtempSync(join(tmpdir(), "starry-v1-"));
+  cleanup = () => { try { rmSync(tmp, { recursive: true, force: true }); } catch { /* 忽略 */ } };
+  try {
+    execFileSync("tar", ["-xzf", archive, "-C", tmp], { stdio: "pipe" });
+  } catch (e) {
+    cleanup();
+    console.error("解包失败（需要系统 tar 支持 gzip）：" + (e && e.message ? e.message : String(e)));
+    process.exit(1);
+  }
+  const found = findDataRoot(tmp);
+  if (!found) {
+    cleanup();
+    console.error("归档里找不到 db/ 子目录，请确认这是 v1 的数据备份包。");
+    process.exit(1);
+  }
+  DATA = found;
+} else {
+  DATA = resolve(dataArg);
+}
+
 const DB_DIR = join(DATA, "db");
 if (!existsSync(DB_DIR)) {
-  console.error("未在 --data 目录下找到 db/ 子目录，请确认指向的是 v1 的数据根目录。");
+  cleanup();
+  console.error("未在 v1 数据根目录下找到 db/ 子目录，请确认指向的是 v1 的数据根目录。");
   process.exit(1);
 }
 
@@ -295,14 +350,14 @@ function mapTimetable() {
   counts.timetable_meta = 1;
 }
 
-// ---------------------------------------------------------------- 文件与 R2
+// ---------------------------------------------------------------- 文件与 B2
 
 function sha256File(p) {
   return createHash("sha256").update(readFileSync(p)).digest("hex");
 }
 
 function mapFiles(items) {
-  const r2 = [];
+  const b2 = [];
   const seenSha = new Set();
   let localOnly = 0;
   let dedupSkipped = 0;
@@ -317,7 +372,7 @@ function mapFiles(items) {
     const mime = S(o, "type", "mime") || "application/octet-stream";
     let local_only = 0;
     let sha256;
-    let r2_key = "";
+    let object_key = "";
 
     if (isLink) {
       // v1 的 link 型指向本机磁盘：v2 标记 local_only，永不上传，手机端点不开。
@@ -329,7 +384,7 @@ function mapFiles(items) {
       const abs = join(DATA, "files", stored);
       if (stored && existsSync(abs)) {
         const sha = sha256File(abs);
-        r2_key = "blob/" + sha.slice(0, 2) + "/" + sha;
+        object_key = "blob/" + sha.slice(0, 2) + "/" + sha;
         sha256 = sha;
         // 内容寻址：同一 sha 只留一行、只上传一次对象（v2 files_sha 唯一索引）。
         if (seenSha.has(sha)) {
@@ -337,7 +392,7 @@ function mapFiles(items) {
           continue;
         }
         seenSha.add(sha);
-        r2.push({ fileId: id, name: S(o, "name"), sha256: sha, r2Key: r2_key, localPath: abs, mime, size });
+        b2.push({ fileId: id, name: S(o, "name"), sha256: sha, objectKey: object_key, localPath: abs, mime, size });
       } else {
         // 上传型但原文件不在（用户可能换过机）：保留行，标记仅电脑可用，不伪造对象地址。
         local_only = 1;
@@ -350,7 +405,7 @@ function mapFiles(items) {
       insert("files", {
         id,
         name: S(o, "name"),
-        r2_key,
+        object_key,
         size,
         mime,
         sha256,
@@ -371,10 +426,10 @@ function mapFiles(items) {
 
   counts.files = items.length - dedupSkipped;
   counts.files_local_only = localOnly;
-  counts.files_to_r2 = r2.length;
+  counts.files_to_b2 = b2.length;
   counts.files_dedup_skipped = dedupSkipped;
   counts.files_missing_upload = missingUpload;
-  return r2;
+  return b2;
 }
 
 // ---------------------------------------------------------------- 主流程
@@ -391,7 +446,7 @@ mapNotes(itemsOf("notes.json"));
 mapKnowledge(itemsOf("knowledge.json"));
 mapLinks(itemsOf("links.json"));
 mapTimetable();
-const r2 = mapFiles(itemsOf("files.json"));
+const b2 = mapFiles(itemsOf("files.json"));
 
 const header = [
   "-- 由 scripts/migrate-v1.mjs 生成的一次性 v1 导入 SQL。",
@@ -406,11 +461,11 @@ const header = [
 writeFileSync(join(OUT_DIR, "v1-import.sql"), header + sql.join("\n") + "\n", "utf8");
 
 const manifest = {
-  note: "逐条用 wrangler r2 object put <bucket>/<r2Key> --file=<localPath> --remote 上传；key 已按 blob/<sha前2位>/<sha> 内容寻址。",
+  note: "逐条把 localPath 按 objectKey 上传到 B2 的 blob/<sha前2位>/<sha>；Worker 用 S3 兼容 API 读写对象，可用任意 S3 客户端（aws s3 cp / b2 CLI 等）完成，key 已按内容寻址。",
   hint: "本清单含真实本机路径，位于已被 gitignore 的目录，切勿提交；上传完即可删除。",
-  items: r2,
+  items: b2,
 };
-writeFileSync(join(OUT_DIR, "files-to-r2.json"), JSON.stringify(manifest, null, 2), "utf8");
+writeFileSync(join(OUT_DIR, "files-to-b2.json"), JSON.stringify(manifest, null, 2), "utf8");
 
 // ---------------------------------------------------------------- 逐集合条数（§10.2 第 4 步校验用）
 // 只打印条数，绝不打印任何姓名 / 课程名 / 成绩 / 路径。
@@ -425,10 +480,13 @@ console.log("  knowledge         : " + counts.knowledge);
 console.log("  links             : " + counts.links);
 console.log("  files (写入行)    : " + counts.files);
 console.log("    local_only      : " + counts.files_local_only);
-console.log("    待上传对象      : " + counts.files_to_r2);
+console.log("    待上传对象      : " + counts.files_to_b2);
 console.log("    内容重复合并    : " + counts.files_dedup_skipped);
 console.log("    上传型原文件缺失: " + counts.files_missing_upload);
 console.log("  显式跳过（不迁移）: " + SKIPPED.join(", "));
-console.log("生成文件：v1-import.sql（" + sql.length + " 条语句）、files-to-r2.json（" + r2.length + " 个对象）");
-// 只打印固定字符串，绝不回显 --data / --out 的真实本机路径。
+console.log("生成文件：v1-import.sql（" + sql.length + " 条语句）、files-to-b2.json（" + b2.length + " 个对象）");
+// 只打印固定字符串，绝不回显 --data / --archive / --out 的真实本机路径。
 console.log("输出目录：" + (arg("out") ? "（由 --out 指定）" : "data/migrations-output（已被 gitignore）"));
+
+// --archive 的解包副本只服务于本次导出，用完立刻删，不留真实数据在临时目录。
+cleanup();
