@@ -69,7 +69,7 @@ npm run dev                         # 本地起在 http://localhost:8787
 4. `npm run db:migrate:remote` → `npm run deploy`，然后在 Cloudflare 绑定自定义域名。
 5. 本机填好 `.env` 跑 `npm run collect`，让 Blackboard 数据进来。
 
-完整步骤与验收清单见 [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md)；
+完整部署步骤与自检项见 [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md)；
 架构与数据模型见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、
 [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)。
 
