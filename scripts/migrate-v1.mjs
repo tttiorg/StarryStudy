@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -78,7 +78,11 @@ if (archiveArg) {
   const tmp = mkdtempSync(join(tmpdir(), "starry-v1-"));
   cleanup = () => { try { rmSync(tmp, { recursive: true, force: true }); } catch { /* 忽略 */ } };
   try {
-    execFileSync("tar", ["-xzf", archive, "-C", tmp], { stdio: "pipe" });
+    // Windows 下 tar 会把源路径里的盘符 "D:" 当成 host:path 远程目标而报
+    // "Cannot connect to D"；从 stdin 读 gzip 流在 Windows 自带 bsdtar 上又会 EOF。
+    // 把归档复制到临时目录、用不含盘符的相对文件名解包，两条坑都绕开。
+    copyFileSync(archive, join(tmp, "archive.tgz"));
+    execFileSync("tar", ["-xzf", "archive.tgz"], { cwd: tmp, stdio: "pipe" });
   } catch (e) {
     cleanup();
     console.error("解包失败（需要系统 tar 支持 gzip）：" + (e && e.message ? e.message : String(e)));
