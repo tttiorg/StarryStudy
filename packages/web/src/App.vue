@@ -6,12 +6,16 @@
     <button class="ss-btn primary" @click="boot">重试</button>
   </div>
 
-  <div v-else-if="auth.state === 'ready'" class="app-shell">
+  <div
+    v-else-if="auth.state === 'ready'"
+    class="app-shell"
+    :class="{ 'is-booted': booted, 'is-entering': entering }"
+  >
     <div class="main-col">
       <header class="topbar">
         <div class="tb-left">
           <span class="brand-dot" />
-          <span class="brand-name">学习桌面</span>
+          <span class="brand-name">StarryStudy</span>
         </div>
 
         <div class="tb-center">
@@ -35,6 +39,14 @@
 
         <div class="tb-right">
           <NoticeBell :subjects="data.subjects" />
+          <button
+            class="icon-btn rail-toggle"
+            :title="ui.railOpen ? '收起外链' : '展开外链'"
+            @click="ui.railOpen = !ui.railOpen"
+          >
+            <AppIcon name="list" :size="14" />
+            <span>外链</span>
+          </button>
           <button class="icon-btn" :title="fsActive ? '退出全屏' : '全屏'" @click="toggleFullscreen">
             <AppIcon :name="fsActive ? 'exitFullscreen' : 'fullscreen'" :size="14" />
             <span>{{ fsActive ? "退出" : "全屏" }}</span>
@@ -61,6 +73,9 @@
   </div>
 
   <div v-else class="boot-msg">正在加载…</div>
+
+  <!-- 启动转场挂在外壳层而不是某个页面里：每次页面加载播一次，切路由不重播 -->
+  <BootSplash v-if="bootActive" :view="bootView" @finish="skipBoot" />
 </template>
 
 <script setup lang="ts">
@@ -71,18 +86,28 @@ import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { useDataStore } from "@/stores/data";
 import { useTheme } from "@/composables/useTheme";
+import { useBoot } from "@/composables/useBoot";
 import LoginGate from "@/components/LoginGate.vue";
 import NoticeBell from "@/components/NoticeBell.vue";
 import RightRail from "@/components/RightRail.vue";
 import SettingsDialog from "@/components/SettingsDialog.vue";
 import ConflictDialog from "@/components/ConflictDialog.vue";
 import AppIcon from "@/components/AppIcon.vue";
+import BootSplash from "@/components/BootSplash.vue";
 
 const route = useRoute();
 const auth = useAuthStore();
 const ui = useUiStore();
 const data = useDataStore();
 const { apply, watchSystem } = useTheme();
+const {
+  active: bootActive,
+  booted,
+  entering,
+  view: bootView,
+  markReady,
+  finish: skipBoot,
+} = useBoot();
 
 const gateVisible = computed(() => auth.state === "login" || auth.state === "setup");
 
@@ -112,6 +137,10 @@ async function boot(): Promise<void> {
     } else {
       auth.fail(msgOf(e));
     }
+  } finally {
+    // 不管成功、失败还是要先设密码，界面状态到这里已经确定，告诉开场转场
+    // 可以揭幕；否则登录门控会一直被盖在转场下面（转场最多仍会等 8s 兜底）。
+    markReady();
   }
 }
 
@@ -278,6 +307,17 @@ onBeforeUnmount(() => {
 .icon-btn:hover {
   border-color: var(--ss-accent);
   color: var(--ss-accent);
+}
+
+/* 桌面右栏常驻，不需要这个开关；只有窄屏才出现 */
+.rail-toggle {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .rail-toggle {
+    display: inline-flex;
+  }
 }
 
 @media (max-width: 700px) {

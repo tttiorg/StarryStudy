@@ -5,14 +5,39 @@
   </div>
 
   <div v-else class="subject-page">
-    <!-- 顶部：学科信息与备注 -->
+    <!-- 顶部：标题在左、教师卡固定在右上角（v1 的 s-top 两列网格）。
+         学科编辑信息已整合进「设置 → 学科管理」，这里不再放编辑按钮。 -->
     <header class="s-top">
       <div class="s-title-row">
         <span class="s-dot" :style="{ background: subject.color }" />
         <h1 class="s-name">{{ subject.name }}</h1>
-        <button class="ss-btn" @click="openSubjectEdit">
-          <AppIcon name="edit" :size="13" /> 编辑信息
-        </button>
+      </div>
+
+      <div class="fac-card s-fac">
+        <div class="fac-text">
+          <div class="fac-name">
+            {{ facultyName }}
+            <span v-if="subject.faculty?.title" class="fac-title">{{ subject.faculty.title }}</span>
+          </div>
+          <div class="fac-dept">{{ subject.faculty?.dept || "课表教师信息" }}</div>
+          <div class="fac-contact">
+            <span v-if="subject.faculty?.email">{{ subject.faculty.email }}</span>
+            <span v-if="subject.faculty?.phone">{{ subject.faculty.phone }}</span>
+          </div>
+        </div>
+        <div
+          class="fac-avatar"
+          :title="subject.faculty?.url ? '点击打开教师官网主页' : '教师信息在「设置 → 学科管理」里编辑'"
+          @click="onFacultyAvatarClick"
+        >
+          <img
+            v-if="facultyAvatar && !avatarBroken"
+            :src="facultyAvatar"
+            alt=""
+            @error="avatarBroken = true"
+          />
+          <span v-else class="fac-initial">{{ facultyInitial }}</span>
+        </div>
       </div>
 
       <div class="s-meta">
@@ -22,22 +47,44 @@
           <span v-if="subject.course?.weeks" class="ss-tag">{{ subject.course.weeks }}</span>
           <span v-if="subject.course?.classCode" class="ss-tag">{{ subject.course.classCode }}</span>
           <span v-if="subject.course?.fullName" class="ss-tag">{{ subject.course.fullName }}</span>
+          <!-- 只保留 BB 外链按钮：站点根来自学科自己填的 BB 课程链接，仓库里不写任何真实域名。
+               链接在「设置 → 学科管理」展开对应学科后修改。 -->
           <a
-            v-if="subject.course?.homepage"
-            class="ss-tag accent"
-            :href="subject.course.homepage"
+            v-if="bbUrl"
+            class="ss-tag bb-link"
+            :href="bbUrl"
             target="_blank"
             rel="noopener"
+            title="打开 Blackboard 课程页"
           >
-            <AppIcon name="external" :size="12" /> 课程主页
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+              <path
+                d="M4 5.5h6.2a3 3 0 0 1 2.4 4.9A3.2 3.2 0 0 1 10.8 17H4Z M4 10.4h6.6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M13.6 8.8h4.2a2.7 2.7 0 0 1 2.2 4.2 2.9 2.9 0 0 1 2 4.6h-8.4Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linejoin="round"
+              />
+            </svg>
+            Blackboard
           </a>
+          <button
+            v-else
+            class="ss-tag bb-link bb-setup"
+            title="在「设置 → 学科管理」里填一次 BB 课程链接，之后所有学科都能跳转"
+            @click="goSubjectSettings"
+          >
+            <AppIcon name="external" :size="12" /> 设置 BB 链接
+          </button>
         </div>
         <p v-if="subject.note" class="s-note">{{ subject.note }}</p>
-        <div v-if="subject.faculty" class="s-faculty">
-          <span>{{ subject.faculty.name }}</span>
-          <span v-if="subject.faculty.title">{{ subject.faculty.title }}</span>
-          <span v-if="subject.faculty.dept">{{ subject.faculty.dept }}</span>
-        </div>
       </div>
     </header>
 
@@ -182,72 +229,44 @@
             <input ref="fileInput" type="file" multiple hidden @change="onFilesPicked" />
             <div v-if="!shownFiles.length" class="ss-empty">点右上角「上传」添加资料</div>
             <div v-else class="file-grid">
-              <div
+              <!-- 左键：先同步开空窗口，再 fetch 文件内容、用 blob: 地址交给新窗口，
+                   Edge 原生 PDF 阅读器直接渲染；右键菜单里有「下载」。
+                   href 指向 ?dl=1，浏览器原生「链接另存为」也能用，同时是 JS 失效时
+                   的降级（点了就下载，符合「不能阅读就下载」）。绝不导航到 /api/... -->
+              <a
                 v-for="f in shownFiles"
                 :key="f.id"
                 class="file-card"
                 :class="{ pinned: f.pinned, local: f.localOnly }"
-                @click="openFile(f)"
+                :href="f.localOnly ? undefined : fileDownloadHref(f)"
+                @click.prevent="openFile(f)"
                 @contextmenu.prevent="onFileMenu($event, f)"
               >
                 <button
                   class="pin-btn"
                   :class="{ on: f.pinned }"
                   :title="f.pinned ? '取消置顶' : '置顶'"
-                  @click.stop="togglePin(f)"
+                  @click.stop.prevent="togglePin(f)"
                 >
                   <AppIcon name="pin" :size="12" />
                 </button>
-                <div class="fc-icon" :style="{ background: iconColor(f) }">{{ extOf(f) }}</div>
+                <!-- 图片资料显示真实缩略图（v1 的 fthumb），加载失败才回落扩展名色块 -->
+                <div v-if="isImageFile(f) && !f.localOnly && !imgBroken[f.id]" class="fc-thumb">
+                  <img :src="fileRawUrl(f)" :alt="f.name" loading="lazy" @error="imgBroken[f.id] = true" />
+                </div>
+                <div v-else class="fc-icon" :style="{ background: iconColor(f) }">{{ extOf(f) }}</div>
                 <div class="fc-name" :title="f.name">{{ f.name }}</div>
                 <div class="fc-meta">{{ fmtSize(f.size) }}</div>
                 <div v-if="tagsOf(f).length" class="fc-tags">
                   <span v-for="t in tagsOf(f)" :key="t" class="ss-tag">{{ t }}</span>
                 </div>
                 <div v-if="f.localOnly" class="fc-local">仅电脑可用</div>
-              </div>
+              </a>
             </div>
           </div>
         </section>
       </div>
     </div>
-
-    <!-- 学科信息编辑 -->
-    <el-dialog v-model="subjectOpen" title="编辑学科信息" width="520">
-      <el-form label-width="82px" @submit.prevent>
-        <el-form-item label="名称">
-          <el-input v-model="subjectForm.name" maxlength="20" />
-        </el-form-item>
-        <el-form-item label="颜色">
-          <el-color-picker v-model="subjectForm.color" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="subjectForm.note" type="textarea" :rows="2" maxlength="1000" />
-        </el-form-item>
-        <el-form-item label="课程全称">
-          <el-input v-model="subjectForm.fullName" maxlength="120" />
-        </el-form-item>
-        <el-form-item label="教师">
-          <el-input v-model="subjectForm.teacher" maxlength="60" />
-        </el-form-item>
-        <el-form-item label="教室">
-          <el-input v-model="subjectForm.room" maxlength="60" />
-        </el-form-item>
-        <el-form-item label="周次">
-          <el-input v-model="subjectForm.weeks" maxlength="60" />
-        </el-form-item>
-        <el-form-item label="课程代码">
-          <el-input v-model="subjectForm.classCode" maxlength="60" />
-        </el-form-item>
-        <el-form-item label="课程主页">
-          <el-input v-model="subjectForm.homepage" maxlength="300" placeholder="https://..." />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="subjectOpen = false">取消</el-button>
-        <el-button type="primary" @click="saveSubject">保存</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 成绩编辑 -->
     <el-dialog v-model="gradeOpen" :title="gradeForm.id ? '编辑成绩' : '添加成绩'" width="460">
@@ -344,18 +363,6 @@
       </template>
     </el-dialog>
 
-    <!-- 页面内预览：PDF 用 iframe 渲染，不是下载 -->
-    <el-dialog v-model="previewOpen" :title="previewFile?.name || '预览'" width="82%" top="4vh">
-      <div class="preview-body">
-        <iframe v-if="previewFile && isPdf(previewFile)" :src="pdfUrl(previewFile)" class="pdf-frame" />
-        <img v-else-if="previewFile && isImage(previewFile)" :src="fileRawUrl(previewFile)" class="img-preview" />
-        <div v-else class="ss-empty">
-          此类型无法在页面内预览，
-          <a v-if="previewFile" :href="fileRawUrl(previewFile)" target="_blank" rel="noopener">在新标签打开</a>
-        </div>
-      </div>
-    </el-dialog>
-
     <!-- 笔记编辑器：正文 800ms 防抖自动保存 -->
     <NoteEditorDialog v-model="noteEditorOpen" :note="editingNote" :subject-id="id" />
 
@@ -385,6 +392,7 @@ import type {
 } from "@starry/shared";
 import { api, msgOf } from "@/api";
 import { useDataStore } from "@/stores/data";
+import { useUiStore } from "@/stores/ui";
 import KnowledgePanel from "@/components/KnowledgePanel.vue";
 import NotesCarousel from "@/components/NotesCarousel.vue";
 import NoteEditorDialog from "@/components/NoteEditorDialog.vue";
@@ -393,6 +401,7 @@ import AppIcon from "@/components/AppIcon.vue";
 
 const props = defineProps<{ id: string }>();
 const data = useDataStore();
+const ui = useUiStore();
 
 const GRADE_LABEL: Record<GradeType, string> = {
   homework: "作业",
@@ -415,6 +424,43 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
 
 const subject = computed(() => data.subjects.find((s) => s.id === props.id));
 const today = computed(() => todayInTZ());
+
+/* ---------------- 跳转 BB / 教师卡 ---------------- */
+// 仓库里不写任何真实学校域名：BB 站点根从「学科自己填的 Blackboard 课程链接」里取。
+// 只要有一门课填了完整的 v1 式 launcher 链接，其余学科就能按 bbCourseId 自动拼出来，
+// 不用每门课都填一次，也不把私有域名写进代码。
+const bbOrigin = computed(() => {
+  for (const s of data.subjects) {
+    const hp = s.course?.homepage?.trim();
+    if (hp && /blackboard|\/webapps\/|bb\./i.test(hp)) {
+      try {
+        return new URL(hp).origin;
+      } catch {
+        // 不是合法 URL 就继续找下一门课
+      }
+    }
+  }
+  return "";
+});
+
+const bbUrl = computed(() => {
+  const s = subject.value;
+  // 本学科填了课程主页就直接用，最精确（可能就是 BB 课程页）
+  const hp = s?.course?.homepage?.trim() ?? "";
+  if (hp) return hp;
+  const cid = s?.bbCourseId?.trim();
+  const origin = bbOrigin.value;
+  return cid && origin
+    ? `${origin}/webapps/blackboard/execute/launcher?type=Course&id=${encodeURIComponent(cid)}&url=`
+    : "";
+});
+
+const facultyName = computed(
+  () => subject.value?.faculty?.name || subject.value?.course?.teacher || "未填写教师",
+);
+const facultyAvatar = computed(() => subject.value?.faculty?.avatar || "");
+const facultyInitial = computed(() => facultyName.value.slice(0, 1) || "师");
+const avatarBroken = ref(false);
 
 const sortedGrades = computed(() =>
   data.grades
@@ -465,57 +511,20 @@ const whenText = computed(() => {
   return [...new Set(list.map((s) => `${DAYS[s.day - 1]} ${blockLabel(s.block)}`))].join("、");
 });
 
-/* ---------------- 学科信息 ---------------- */
-const subjectOpen = ref(false);
-const subjectForm = reactive({
-  name: "",
-  color: "#4f9cf9",
-  note: "",
-  fullName: "",
-  teacher: "",
-  room: "",
-  weeks: "",
-  classCode: "",
-  homepage: "",
-});
-
-function openSubjectEdit(): void {
-  const s = subject.value;
-  if (!s) return;
-  subjectForm.name = s.name;
-  subjectForm.color = s.color;
-  subjectForm.note = s.note ?? "";
-  const c = s.course;
-  subjectForm.fullName = c?.fullName ?? "";
-  subjectForm.teacher = c?.teacher ?? "";
-  subjectForm.room = c?.room ?? "";
-  subjectForm.weeks = c?.weeks ?? "";
-  subjectForm.classCode = c?.classCode ?? "";
-  subjectForm.homepage = c?.homepage ?? "";
-  subjectOpen.value = true;
+/* ---------------- 跳转设置 / 教师卡 ----------------
+ * 学科信息编辑已整合进「设置 → 学科管理」，学科页只留查看与外链跳转。
+ * 点「设置 BB 链接」时直接打开设置并展开当前学科，用户不用自己找。 */
+function goSubjectSettings(): void {
+  ui.openSettings("subjects", props.id);
 }
 
-async function saveSubject(): Promise<void> {
-  if (!subjectForm.name.trim()) {
-    ElMessage.warning("请填名称");
-    return;
-  }
-  const out = await data.update("subjects", props.id, {
-    name: subjectForm.name.trim(),
-    color: subjectForm.color,
-    note: subjectForm.note,
-    course: {
-      fullName: subjectForm.fullName.trim(),
-      teacher: subjectForm.teacher.trim(),
-      room: subjectForm.room.trim(),
-      weeks: subjectForm.weeks.trim(),
-      classCode: subjectForm.classCode.trim(),
-      homepage: subjectForm.homepage.trim(),
-    },
-  });
-  if (out.ok) {
-    subjectOpen.value = false;
-    ElMessage.success("已保存");
+const facultyUrl = computed(() => subject.value?.faculty?.url?.trim() ?? "");
+
+function onFacultyAvatarClick(): void {
+  if (facultyUrl.value) {
+    window.open(facultyUrl.value, "_blank", "noopener");
+  } else {
+    ElMessage.info("还没填教师官网链接，可在「设置 → 学科管理」里展开本学科填写");
   }
 }
 
@@ -665,6 +674,8 @@ async function removeTask(t: Task): Promise<void> {
 
 /* ---------------- 资料 ---------------- */
 const uploading = ref(false);
+// 缩略图加载失败的资料 id：失败一次就回落到扩展名色块，别反复请求
+const imgBroken = reactive<Record<string, boolean>>({});
 const fileInput = ref<HTMLInputElement | null>(null);
 const fileEditOpen = ref(false);
 const fileForm = reactive({
@@ -676,21 +687,22 @@ const fileForm = reactive({
   note: "",
   pinned: false,
 });
-const previewOpen = ref(false);
-const previewFile = ref<StudyFile | null>(null);
-
 // FE-02：模板里不直接引用 api 的方法，统一包一层组件内方法
 function fileRawUrl(f: StudyFile): string {
   return api.files.rawUrl(f.id);
 }
-function pdfUrl(f: StudyFile): string {
-  return `${fileRawUrl(f)}#view=FitH`;
+
+function fileDownloadHref(f: StudyFile): string {
+  return api.files.downloadUrl(f.id);
 }
-function isPdf(f: StudyFile): boolean {
-  return /pdf/i.test(f.mime) || /\.pdf$/i.test(f.name);
-}
+
 function isImage(f: StudyFile): boolean {
   return /^image\//i.test(f.mime);
+}
+
+// 资料卡缩略图：mime 可能为空，再按扩展名兜一次，和 v1 的 kindOf 口径一致
+function isImageFile(f: StudyFile): boolean {
+  return isImage(f) || /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(f.name);
 }
 
 function fmtSize(bytes: number): string {
@@ -742,14 +754,87 @@ async function onFilesPicked(e: Event): Promise<void> {
   }
 }
 
-function openFile(f: StudyFile): void {
-  // localOnly 指向本机磁盘，永远不上传，手机端不可点开（§5.2）
+/* ---------------- 打开 / 下载文件 ----------------
+ * 上一版直接让浏览器导航到 /api/files/:id/raw，结果被旧 SW 的导航兜底或 PWA
+ * 独立窗口换成 index.html，Vue Router 再显示 404，就是「套娃窗口」。
+ * 现在改成 fetch + blob:，全程不产生 /api/... 的页面导航。 */
+const PREVIEW_MIME = /^(application\/pdf|text\/|image\/|audio\/|video\/|application\/json)/i;
+const PREVIEW_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|avif|txt|md|json|log|html?|mp3|wav|m4a|mp4|webm)$/i;
+
+function canPreview(mime: string, name: string): boolean {
+  return PREVIEW_MIME.test(mime) || PREVIEW_EXT.test(name);
+}
+
+function triggerDownload(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name || "download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 给浏览器取走内容的时间，再释放 blob 地址
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+/** JS 不可用 / fetch 失败时的降级：直接吃服务端 ?dl=1 的 attachment 响应 */
+function fallbackDownload(f: StudyFile): void {
+  const a = document.createElement("a");
+  a.href = api.files.downloadUrl(f.id);
+  a.download = f.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
+ * 左键与右键「在新窗口打开」：
+ * 1) 先同步开空窗口 —— 必须在用户手势内完成，await fetch 之后再 open 会被拦截；
+ * 2) fetch 文件内容（不是页面导航，旧 SW 导航兜底 / SPA fallback 都碰不到它）；
+ * 3) 浏览器能渲染 → blob: 地址交给新窗口，Edge 原生 PDF 阅读器直接打开；
+ *    不能渲染或开窗口失败 → 关掉空窗口走下载（「不能阅读就下载」）。
+ */
+async function openFile(f: StudyFile): Promise<void> {
   if (f.localOnly) {
     ElMessage.info("此文件仅电脑可用，无法在这里打开");
     return;
   }
-  previewFile.value = f;
-  previewOpen.value = true;
+  const win = window.open("", "_blank");
+  let blobUrl: string | null = null;
+  try {
+    const { blob, mime, name } = await api.files.readFile(f.id);
+    const finalName = name || f.name;
+    if (!canPreview(mime, finalName) || !win) {
+      win?.close();
+      triggerDownload(blob, finalName);
+      return;
+    }
+    blobUrl = URL.createObjectURL(blob);
+    win.location.replace(blobUrl);
+    // 新窗口加载完才释放；60s 足够，且不影响已经渲染出来的 PDF
+    setTimeout(() => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    }, 60_000);
+  } catch (e) {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    win?.close();
+    fallbackDownload(f);
+    ElMessage.warning(`无法在新窗口预览，已转为下载（${msgOf(e)}）`);
+  }
+}
+
+/** 右键「下载」：同样用 blob 下载，彻底不产生 /api/... 导航请求 */
+async function downloadFile(f: StudyFile): Promise<void> {
+  if (f.localOnly) {
+    ElMessage.info("此文件仅电脑可用，无法下载");
+    return;
+  }
+  try {
+    const { blob, name } = await api.files.readFile(f.id);
+    triggerDownload(blob, name || f.name);
+  } catch {
+    fallbackDownload(f);
+  }
 }
 
 function openFileEdit(f: StudyFile): void {
@@ -843,12 +928,16 @@ function onFileMenu(e: MouseEvent, f: StudyFile): void {
   ctx.value?.open(
     e,
     [
+      { key: "open", label: "在新窗口打开" },
+      { key: "download", label: "下载" },
       { key: "edit", label: "编辑" },
       { key: "pin", label: f.pinned ? "取消置顶" : "置顶" },
       { key: "del", label: "删除", danger: true },
     ],
     (k: string) => {
-      if (k === "edit") openFileEdit(f);
+      if (k === "open") void openFile(f);
+      else if (k === "download") void downloadFile(f);
+      else if (k === "edit") openFileEdit(f);
       else if (k === "pin") void togglePin(f);
       else void removeFile(f);
     },
@@ -869,12 +958,10 @@ onMounted(() => {
 watch(
   () => props.id,
   () => {
-    subjectOpen.value = false;
     gradeOpen.value = false;
     taskOpen.value = false;
     fileEditOpen.value = false;
     noteEditorOpen.value = false;
-    previewOpen.value = false;
   },
 );
 </script>
@@ -896,16 +983,24 @@ watch(
   gap: 16px;
 }
 
+/* 标题在左、教师卡固定在右上角，两行共用右侧那一格（v1 的 s-top 网格） */
 .s-top {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title fac"
+    "meta  fac";
+  align-items: start;
+  gap: 8px 18px;
 }
 
 .s-title-row {
+  grid-area: title;
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .s-dot {
@@ -921,11 +1016,9 @@ watch(
   font-weight: 650;
 }
 
-.s-title-row .ss-btn {
-  margin-left: auto;
-}
-
 .s-meta {
+  grid-area: meta;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -949,11 +1042,142 @@ watch(
   white-space: pre-wrap;
 }
 
-.s-faculty {
+/* ---------- 跳转 BB ---------- */
+.bb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ss-accent);
+  border-color: color-mix(in srgb, var(--ss-accent) 40%, transparent);
+  background: var(--ss-accent-soft);
+  text-decoration: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.bb-link:hover {
+  border-color: var(--ss-accent);
+}
+
+/* 还没填任何 BB 链接时的引导按钮，和真正可跳转的标签区分开 */
+.bb-setup {
+  border-style: dashed;
+  color: var(--ss-muted);
+  background: transparent;
+}
+
+/* ---------- 教师卡（右上角，文字右对齐、头像在最右） ---------- */
+.fac-card {
+  grid-area: fac;
   display: flex;
-  gap: 10px;
-  font-size: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  min-width: 260px;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius);
+  background: var(--ss-surface);
+}
+
+.fac-text {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+}
+
+.fac-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fac-title {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ss-muted);
+  background: var(--ss-surface-2);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.fac-dept {
+  margin-top: 3px;
+  font-size: 11.5px;
   color: var(--ss-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-contact {
+  margin-top: 2px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--ss-muted);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fac-avatar {
+  width: 58px;
+  height: 58px;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ss-border);
+  background: var(--ss-surface-2);
+  color: var(--ss-accent);
+  font-size: 20px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.fac-avatar:hover {
+  border-color: var(--ss-accent);
+}
+
+.fac-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 窄屏：教师卡占满一整行，文字改回左对齐 */
+@media (max-width: 820px) {
+  .s-top {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "fac"
+      "meta";
+    gap: 10px;
+  }
+  .fac-card {
+    width: 100%;
+    min-width: 0;
+  }
+  .fac-text {
+    text-align: left;
+  }
+  .fac-name {
+    justify-content: flex-start;
+  }
+  .fac-contact {
+    justify-content: flex-start;
+  }
 }
 
 /* ---------- 三列（产品核心） ---------- */
@@ -1102,12 +1326,24 @@ watch(
   color: var(--ss-dim);
 }
 
+/* 每行高度 = padding 8+8 + 内容 22 + 底边 1 = 39px。
+   容器固定成正好 10 行（390px），第 11 条起在容器内滚动。
+   绝不改成「只渲染 10 条」：用户要的是能看到全部，只是把框限高。 */
 .grade-list {
+  --grade-row-h: 39px;
   display: flex;
   flex-direction: column;
+  height: calc(var(--grade-row-h) * 10);
+  overflow-y: auto;
+  /* 滚动条不挤压内容：留一点右内边距 */
+  padding-right: 2px;
 }
 
 .grade-row {
+  /* 行高必须固定，否则上面那个 10 行的算式对不上 */
+  flex: none;
+  height: var(--grade-row-h);
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 62px 34px;
   align-items: center;
@@ -1257,6 +1493,9 @@ watch(
   text-align: center;
   transition: all 0.15s;
   min-width: 0;
+  /* 卡片是 <a>，别让浏览器把整卡染成链接色或加下划线 */
+  color: inherit;
+  text-decoration: none;
 }
 
 .file-card:hover {
@@ -1304,6 +1543,24 @@ watch(
   letter-spacing: 0.3px;
 }
 
+/* 图片资料的真实缩略图；加载失败由 imgBroken 回落到上面的扩展名色块 */
+.fc-thumb {
+  width: 42px;
+  height: 46px;
+  flex: none;
+  border-radius: 7px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--ss-surface-2);
+}
+
+.fc-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .fc-name {
   width: 100%;
   font-size: 11.5px;
@@ -1337,27 +1594,4 @@ watch(
   width: 100%;
 }
 
-/* ---------- 预览 ---------- */
-.preview-body {
-  min-height: 60dvh;
-}
-
-.pdf-frame {
-  width: 100%;
-  height: 72dvh;
-  border: 1px solid var(--ss-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.img-preview {
-  max-width: 100%;
-  max-height: 72dvh;
-  display: block;
-  margin: 0 auto;
-}
-
-.preview-body a {
-  color: var(--ss-accent);
-}
 </style>

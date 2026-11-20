@@ -34,6 +34,8 @@ export interface RequestOptions {
 interface FsPromisesLike {
   mkdir(p: string, opts: { recursive: boolean }): Promise<unknown>;
   writeFile(p: string, data: string, enc: string): Promise<void>;
+  readdir(p: string): Promise<string[]>;
+  unlink(p: string): Promise<void>;
 }
 interface PathLike {
   dirname(p: string): string;
@@ -110,6 +112,9 @@ export class HttpClient {
     let body = opts.body;
     const hops: Hop[] = [];
     const loop = follow ? this.maxHops : 1;
+    // 整次 request 共用一个 deadline。以前每跳各建一个 20s timer，
+    // 8 跳最坏 160s，叠加逐门课串行后会逼近定时周期，导致下一轮与它重叠。
+    const deadline = AbortSignal.timeout(opts.timeoutMs ?? this.timeoutMs);
 
     for (let i = 0; i < loop; i += 1) {
       const headers = { ...baseHeaders };
@@ -129,7 +134,7 @@ export class HttpClient {
         headers,
         body: payload,
         redirect: "manual",
-        signal: AbortSignal.timeout(opts.timeoutMs ?? this.timeoutMs),
+        signal: deadline,
       });
       this.absorb(res);
 
@@ -150,6 +155,9 @@ export class HttpClient {
   }
 }
 
+/** 调试文件保留上限：无人值守每小时跑，失败时不清理会一直堆到占满磁盘。 */
+const MAX_DEBUG_FILES = 20;
+
 /**
  * 失败时留证据（BB-07）。只回路径、不把 HTML 打到屏上。
  * 落在仓库根的 .workbuddy/bb-debug/，该目录已被根 .gitignore 排除；
@@ -169,6 +177,17 @@ export async function dumpDebugHtml(label: string, html: string): Promise<string
     const root = path.resolve(here, "../../..");                // src -> collector -> packages -> 仓库根
     const dir = path.join(root, ".workbuddy", "bb-debug");
     await fs.mkdir(dir, { recursive: true });
+
+    // 先清理再写：文件名带时间戳，字典序即时间序，只保留最近 MAX_DEBUG_FILES 个。
+    // 清理失败不影响本次留证，所以单独 try 包住。
+    try {
+      const files = (await fs.readdir(dir)).filter((f) => f.endsWith(".html")).sort();
+      const excess = files.length - MAX_DEBUG_FILES + 1;
+      for (let i = 0; i < Math.max(0, excess); i += 1) {
+        try { await fs.unlink(path.join(dir, files[i])); } catch { /* 已被别处删掉 */ }
+      }
+    } catch { /* 目录读不了就算了 */ }
+
     const stamp = nowIso().replace(/[:.]/g, "-");
     const file = path.join(dir, `${label}-${stamp}.html`);
     await fs.writeFile(file, html, "utf8");

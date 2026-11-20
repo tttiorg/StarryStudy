@@ -1,5 +1,8 @@
 <template>
-  <aside class="rail">
+  <!-- 遮罩必须是根节点而不是 aside 的子元素：aside 靠 right 位移，不能用 transform，
+       否则 fixed 遮罩会被裁进 aside 自己创建的 containing block 里。 -->
+  <div v-if="isMobile && ui.railOpen" class="rail-mask" @click="ui.railOpen = false" />
+  <aside class="rail" :class="{ 'is-mobile': isMobile, open: ui.railOpen }">
     <div class="rail-list">
       <a
         v-for="(l, i) in data.links"
@@ -48,7 +51,7 @@
           <el-input v-model="form.url" placeholder="https://..." @keyup.enter="submit" />
         </el-form-item>
       </el-form>
-      <p class="rail-tip">图标优先取站点根目录，抓不到时显示名称首字色块。</p>
+      <p class="rail-tip">图标由服务端抓取站点 favicon，抓不到时显示名称首字色块。</p>
       <template #footer>
         <el-button @click="dialogOpen = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submit">
@@ -62,14 +65,27 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { Link } from "@starry/shared";
+import { api } from "@/api";
 import { useDataStore } from "@/stores/data";
+import { useUiStore } from "@/stores/ui";
 import AppIcon from "@/components/AppIcon.vue";
 import ContextMenu from "@/components/ContextMenu.vue";
 
 const data = useDataStore();
+const ui = useUiStore();
+
+/** 窄屏判定只用于右栏形态；桌面右栏常驻，不受 railOpen 影响。 */
+const isMobile = ref(false);
+let mq: MediaQueryList | null = null;
+
+function onMqChange(e: MediaQueryListEvent): void {
+  isMobile.value = e.matches;
+  // 回到桌面时清掉开关，避免下次切回窄屏时抽屉自己展开
+  if (!e.matches) ui.railOpen = false;
+}
 
 const broken = reactive<Record<string, boolean>>({});
 const dialogOpen = ref(false);
@@ -79,14 +95,11 @@ const form = reactive({ id: "", name: "", url: "" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ctx = ref<any>(null);
 
-/** 没有自定义图标时试站点根目录的 favicon；失败由 @error 回落到首字色块 */
+/** 没有自定义图标时走 Worker 的 favicon 代理；失败由 @error 回落到首字色块。
+ *  直连站点 /favicon.ico 会被证书、登录墙或 CORS 挡掉，这正是 v2 图标全不显示的原因。 */
 function iconUrl(l: Link): string {
   if (l.icon) return l.icon;
-  try {
-    return new URL(l.url).origin + "/favicon.ico";
-  } catch {
-    return "";
-  }
+  return api.links.faviconUrl(l.url);
 }
 
 /** 用名称生成一个稳定的色相，避免所有首字块都是一个颜色 */
@@ -163,9 +176,13 @@ function onDragEnd(): void {
   overIdx.value = -1;
 }
 
-/** 拖完手一松会紧接触发 click，挡掉避免误开网页 */
+/** 拖完手一松会紧接触发 click，挡掉避免误开网页；窄屏点开外链后顺手收起抽屉 */
 function onClick(e: MouseEvent): void {
-  if (justDragged) e.preventDefault();
+  if (justDragged) {
+    e.preventDefault();
+    return;
+  }
+  if (isMobile.value) ui.railOpen = false;
 }
 
 async function submit(): Promise<void> {
@@ -204,7 +221,14 @@ async function askRemove(l: Link): Promise<void> {
 }
 
 onMounted(() => {
+  mq = window.matchMedia("(max-width: 900px)");
+  isMobile.value = mq.matches;
+  mq.addEventListener("change", onMqChange);
   void data.load("links");
+});
+
+onBeforeUnmount(() => {
+  mq?.removeEventListener("change", onMqChange);
 });
 </script>
 
@@ -328,9 +352,54 @@ onMounted(() => {
   color: var(--ss-muted);
 }
 
+/* ---------- 窄屏：覆盖式抽屉 ----------
+   不挤压左侧：position: fixed 脱离 flex 流，主列始终占满宽度。
+   用 right 位移而不是 transform，保证上面的 fixed 遮罩能覆盖整个视口。 */
+.rail-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.34);
+}
+
 @media (max-width: 900px) {
   .rail {
-    display: none;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: -200px;
+    width: 190px;
+    z-index: 60;
+    padding: 14px 10px 16px;
+    transition: right 0.22s ease;
+    box-shadow: none;
+  }
+
+  .rail.open {
+    right: 0;
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.28);
+  }
+
+  .rail-list {
+    align-items: stretch;
+  }
+
+  .rail-item {
+    width: 100%;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 9px 10px;
+  }
+
+  .rail-name {
+    max-width: none;
+    font-size: 12.5px;
+  }
+
+  .rail-add {
+    width: 100%;
+    height: 34px;
   }
 }
 </style>

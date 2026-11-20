@@ -40,7 +40,7 @@ export interface Subject extends BaseRecord {
 
 export interface TimetableSlot {
   day: number;    // 1-7
-  block: number;  // 1-6
+  block: number;  // 1..MAX_BLOCKS；默认只排 5 块，节数由课表配置自定义
   name: string;
   room: string;
   teacher: string;
@@ -152,6 +152,24 @@ export interface SyncRun {
   skipped: number;
   error: string;
   ranAt: string;
+}
+
+/** /api/sync/status 的返回。pendingAt 是「手动抓取」登记时间，采集器跑完会清掉。 */
+export interface SyncStatus {
+  items: SyncRun[];
+  lastRunAt: string | null;
+  pendingAt: string | null;
+}
+
+/** /api/wallpaper/list 的一项；src 指向同源代理，credit 是图片版权说明。 */
+export interface Wallpaper {
+  src: string;
+  credit: string;
+  date: string;
+}
+
+export interface WallpaperList {
+  items: Wallpaper[];
 }
 
 export interface FileStats {

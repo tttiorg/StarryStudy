@@ -222,7 +222,10 @@ function edgeCache(): EdgeCacheLike | null {
 
 const EDGE_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 
-async function rawFile(request: Request, env: Env, id: string): Promise<Response> {
+async function rawFile(request: Request, env: Env, id: string, url: URL): Promise<Response> {
+  // ?dl=1 是「右键下载」专用：同一份对象、同一个路由，只把处置方式换成 attachment。
+  // 这样左键新窗口（inline）与右键下载共用一份数据，不用再开一条接口。
+  const wantsDownload = url.searchParams.has("dl");
   const row = await env.DB.prepare("SELECT * FROM files WHERE id = ? AND deleted_at IS NULL").bind(id).first();
   if (!row) return notFound();
   const f = rowToObject<FileRow>(row as Record<string, unknown>);
@@ -241,7 +244,10 @@ async function rawFile(request: Request, env: Env, id: string): Promise<Response
     new URL(`/__blobcache/${encodeURIComponent(f.sha256)}/${encodeURIComponent(f.name)}`, request.url).toString(),
   );
   const cache = edgeCache();
-  const canCache = Boolean(cache) && !range && !inm && !f.sha256.startsWith("local:");
+  // 下载响应不能进边缘缓存：缓存键只按 sha/文件名算，若把 attachment 存进去，
+  // 下次 inline 打开会命中同一份带 attachment 头的响应，变成一点击就下载。
+  const canCache = Boolean(cache) && !range && !inm && !wantsDownload &&
+    !f.sha256.startsWith("local:");
   if (canCache && cache) {
     try {
       const hit = await cache.match(cacheKey);
@@ -270,10 +276,12 @@ async function rawFile(request: Request, env: Env, id: string): Promise<Response
   headers.set("cache-control", "private, max-age=0");
   headers.set("accept-ranges", "bytes");
   headers.set("content-type", object.contentType || f.mime || "application/octet-stream");
-  // PDF 必须 inline 且 Content-Type 正确，手机 Edge 才能在页面内翻页渲染而不是下载
+  // 左键新窗口打开必须 inline 且 Content-Type 正确，浏览器才会用内置 PDF 阅读器渲染；
+  // 右键下载改成 attachment，文件名同时给 ASCII 与 RFC 5987 两种写法，中文名不乱码。
   headers.set(
     "content-disposition",
-    `inline; filename="${asciiFilename(f.name)}"; filename*=UTF-8''${encodeURIComponent(f.name)}`,
+    `${wantsDownload ? "attachment" : "inline"}; ` +
+      `filename="${asciiFilename(f.name)}"; filename*=UTF-8''${encodeURIComponent(f.name)}`,
   );
 
   // ETag 命中返回 304 且无 body，省流量也不会让手机看到旧版本（CF-08）
@@ -376,7 +384,7 @@ export async function handleFiles(
   }
 
   if (parts.length === 2 && parts[1] === "raw" && method === "GET") {
-    return rawFile(request, env, parts[0]);
+    return rawFile(request, env, parts[0], url);
   }
 
   if (parts.length === 2 && parts[1] === "presign" && method === "POST") {

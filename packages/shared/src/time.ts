@@ -55,6 +55,31 @@ export function nowIso(now: Date = new Date()): string {
   return now.toISOString();
 }
 
+/** UTC ISO 时间戳 -> 北京时间 "YYYY-MM-DD HH:mm"；非法输入返回空串。
+ *  前端展示抓取时间必须走这里，别在组件里自己 new Date() 猜时区。 */
+export function formatInTZ(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = parts(d);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
+/** 相对时间（刚刚 / N 分钟前 / N 小时前 / N 天前），超过 30 天回落到绝对时间。 */
+export function agoInTZ(iso: string, now: Date = new Date()): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const mins = Math.floor((now.getTime() - t) / 60_000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return `${mins} 分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  return formatInTZ(iso);
+}
+
 /** 日期型字段的加减。用 UTC 正午做锚点，避免任何时区/夏令时把日期挪一天。 */
 export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T12:00:00.000Z`);

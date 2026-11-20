@@ -10,8 +10,7 @@
         </p>
       </div>
       <div class="head-actions">
-        <button class="ss-btn" @click="metaOpen = true">编辑信息</button>
-        <button v-if="data.timetable.slots.length" class="ss-btn danger" @click="clearAll">清空课表</button>
+        <button class="ss-btn" @click="openMeta">编辑信息</button>
       </div>
     </div>
 
@@ -56,8 +55,8 @@
       </template>
     </el-dialog>
 
-    <!-- 课表元信息 -->
-    <el-dialog v-model="metaOpen" title="课表信息" width="440">
+    <!-- 课表元信息：节次设置与清空课表都收进这里，避免在外面误触 -->
+    <el-dialog v-model="metaOpen" title="课表信息" width="560" @closed="clearConfirm = false">
       <el-form label-width="82px" @submit.prevent>
         <el-form-item label="学期">
           <el-input v-model="metaForm.semester" maxlength="60" />
@@ -69,6 +68,51 @@
           <el-date-picker v-model="metaForm.startDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
       </el-form>
+
+      <div class="tt-blocks-zone">
+        <div class="bz-head">
+          <span class="dz-title">每天节次</span>
+          <span class="bz-count">共 {{ blockDraft.length }} 节 · 最多 {{ MAX_BLOCKS }} 节</span>
+        </div>
+        <p class="dz-hint">
+          可增删节次、改名称与时间。减少节数不会删除已排的课程，重新加回节数后会再次显示。
+        </p>
+        <div v-for="(b, i) in blockDraft" :key="i" class="bz-row">
+          <span class="bz-no">{{ i + 1 }}</span>
+          <el-input v-model="b.label" class="bz-label" placeholder="节次名称" maxlength="24" />
+          <el-input v-model="b.time" class="bz-time" placeholder="时间，如 08:00-09:50" maxlength="40" />
+          <button
+            class="bz-del"
+            type="button"
+            title="删除这一节"
+            :disabled="blockDraft.length <= 1"
+            @click="removeBlock(i)"
+          >
+            删除
+          </button>
+        </div>
+        <button class="bz-add" type="button" :disabled="blockDraft.length >= MAX_BLOCKS" @click="addBlock">
+          增加一节
+        </button>
+      </div>
+
+      <div class="tt-danger-zone">
+        <div class="dz-title">清空整张课表</div>
+        <p class="dz-hint">会删掉全部格子且无法撤销。请先勾选下方确认框。</p>
+        <el-checkbox v-model="clearConfirm">
+          我已确认要清空全部 {{ data.timetable.slots.length }} 节课
+        </el-checkbox>
+        <el-button
+          class="dz-btn"
+          type="danger"
+          plain
+          :disabled="!clearConfirm || !data.timetable.slots.length"
+          @click="clearAll"
+        >
+          清空课表
+        </el-button>
+      </div>
+
       <template #footer>
         <el-button @click="metaOpen = false">取消</el-button>
         <el-button type="primary" @click="saveMeta">保存</el-button>
@@ -82,7 +126,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessageBox } from "element-plus";
-import { BLOCKS, DAYS } from "@starry/shared";
+import { BLOCKS, DAYS, MAX_BLOCKS } from "@starry/shared";
 import type { TimetableBlock, TimetableSlot } from "@starry/shared";
 import { useDataStore } from "@/stores/data";
 import TimetableGrid from "@/components/TimetableGrid.vue";
@@ -95,8 +139,10 @@ interface CellPayload {
 }
 
 const data = useDataStore();
+// 节次以服务端下发的动态配置为准；没配置时回退默认表，MAX_BLOCKS 只兜住坏数据。
 const blockList = computed<TimetableBlock[]>(() =>
-  data.timetable.blocks.length ? data.timetable.blocks : (BLOCKS as TimetableBlock[]),
+  (data.timetable.blocks.length ? data.timetable.blocks : (BLOCKS as TimetableBlock[]))
+    .filter((b) => b.index >= 1 && b.index <= MAX_BLOCKS),
 );
 
 function blockLabel(idx: number): string {
@@ -194,17 +240,31 @@ function onCellMenu(e: MouseEvent, payload: CellPayload): void {
 }
 
 async function clearAll(): Promise<void> {
+  // 复选是硬门槛，再叠一次确认框：清空整张课表不可撤销，宁可多点一下。
+  if (!clearConfirm.value) return;
   try {
-    await ElMessageBox.confirm("确定清空整张课表？", "清空课表", { type: "warning" });
+    await ElMessageBox.confirm(
+      `确定清空全部 ${data.timetable.slots.length} 节课？此操作无法撤销。`,
+      "清空课表",
+      { type: "warning", confirmButtonText: "清空", cancelButtonText: "取消" },
+    );
   } catch {
     return;
   }
-  await data.clearTimetable();
+  const ok = await data.clearTimetable();
+  if (ok) {
+    clearConfirm.value = false;
+    metaOpen.value = false;
+  }
 }
 
 /* ---------------- 课表元信息 ---------------- */
 const metaOpen = ref(false);
+const clearConfirm = ref(false);
 const metaForm = reactive({ semester: "", student: "", startDate: "" });
+// 节次只在弹窗里编辑草稿，点「保存」才整体提交；取消/关闭不会动服务端数据。
+const blockDraft = reactive<TimetableBlock[]>([]);
+let blockSnapshot = "";
 
 function syncMeta(): void {
   const m = data.timetable.meta;
@@ -213,13 +273,59 @@ function syncMeta(): void {
   metaForm.startDate = m.startDate ?? "";
 }
 
+/** 草稿统一成「序号连续 + 去掉首尾空格」的形状，提交与比对都用同一份。 */
+function normalizeBlocks(): TimetableBlock[] {
+  return blockDraft.map((b, i) => ({
+    index: i + 1,
+    label: b.label.trim(),
+    time: b.time.trim(),
+  }));
+}
+
+function syncBlocks(): void {
+  const src = data.timetable.blocks.length ? data.timetable.blocks : (BLOCKS as TimetableBlock[]);
+  blockDraft.splice(
+    0,
+    blockDraft.length,
+    ...src.map((b) => ({ index: b.index, label: b.label, time: b.time })),
+  );
+  blockSnapshot = JSON.stringify(normalizeBlocks());
+}
+
+function addBlock(): void {
+  if (blockDraft.length >= MAX_BLOCKS) return;
+  const i = blockDraft.length + 1;
+  blockDraft.push({ index: i, label: `第${i}节`, time: "" });
+}
+
+function removeBlock(i: number): void {
+  if (blockDraft.length <= 1) return;
+  blockDraft.splice(i, 1);
+  blockDraft.forEach((b, idx) => {
+    b.index = idx + 1;
+  });
+}
+
+function openMeta(): void {
+  clearConfirm.value = false;
+  syncMeta();
+  syncBlocks();
+  metaOpen.value = true;
+}
+
 async function saveMeta(): Promise<void> {
-  const ok = await data.saveMeta({
+  const metaOk = await data.saveMeta({
     semester: metaForm.semester.trim(),
     student: metaForm.student.trim(),
     startDate: metaForm.startDate || "",
   });
-  if (ok) metaOpen.value = false;
+  // 节次没改就不发请求，避免每次保存元信息都无谓地覆盖一次单点配置。
+  let blocksOk = true;
+  const normalized = normalizeBlocks();
+  if (JSON.stringify(normalized) !== blockSnapshot) {
+    blocksOk = await data.saveBlocks(normalized);
+  }
+  if (metaOk && blocksOk) metaOpen.value = false;
 }
 
 onMounted(() => {
@@ -265,5 +371,124 @@ onMounted(() => {
   margin: 4px 0 0;
   font-size: 11.5px;
   color: var(--ss-dim);
+}
+
+.tt-blocks-zone {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--ss-border);
+  border-radius: 10px;
+  background: var(--ss-surface-2);
+}
+
+.bz-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bz-count {
+  font-size: 11.5px;
+  color: var(--ss-dim);
+  white-space: nowrap;
+}
+
+.bz-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bz-no {
+  width: 20px;
+  flex: none;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ss-muted);
+}
+
+.bz-label {
+  flex: 1 1 40%;
+  min-width: 0;
+}
+
+.bz-time {
+  flex: 1 1 46%;
+  min-width: 0;
+}
+
+.bz-del,
+.bz-add {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid var(--ss-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ss-text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.bz-del:hover:not(:disabled) {
+  border-color: var(--ss-danger);
+  color: var(--ss-danger);
+}
+
+.bz-add {
+  margin-top: 10px;
+}
+
+.bz-add:hover:not(:disabled) {
+  border-color: var(--ss-accent);
+  color: var(--ss-accent);
+}
+
+.bz-del:disabled,
+.bz-add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 520px) {
+  .bz-row {
+    flex-wrap: wrap;
+  }
+  .bz-label,
+  .bz-time {
+    flex: 1 1 100%;
+  }
+  .bz-del {
+    margin-left: auto;
+  }
+}
+
+.tt-danger-zone {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--ss-border);
+  border-radius: 10px;
+  background: var(--ss-surface-2);
+}
+
+.dz-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ss-text);
+}
+
+.dz-hint {
+  margin: 4px 0 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ss-muted);
+}
+
+.dz-btn {
+  margin-top: 10px;
 }
 </style>

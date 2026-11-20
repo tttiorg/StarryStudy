@@ -112,10 +112,13 @@ function runPs(script) {
 }
 
 function askUrl() {
+  // 提示里直接把「要买什么 / 装什么」说清楚：很多人以为双击 exe 就能用，
+  // 其实服务端必须先部署好，这里填的只是访问网址。指向下载者操作手册（不是
+  // 只给部署文档），因为下载者需要的是从零到能用的完整顺序。
   const script = `
 Add-Type -AssemblyName Microsoft.VisualBasic
 $u = [Microsoft.VisualBasic.Interaction]::InputBox(
-  '请输入 StarryStudy 的访问网址（部署完成后绑定的自定义域名）',
+  '请输入 StarryStudy 访问网址（https://你的域名）。注意：这个 exe 只是桌面启动器，不含服务端和数据。还没部署？请看仓库 installer/README.md「下载者操作手册」：要买什么、装什么、配置什么、怎么部署、怎么安装都写在里面。',
   'StarryStudy 安装',
   '${DEFAULT_URL}')
 [Console]::Out.Write($u)
@@ -250,6 +253,14 @@ function install(args) {
   console.log("安装完成：" + targetExe);
   console.log("访问地址：" + url);
   console.log("首次打开需要登录一次，之后浏览器会记住会话。");
+  console.log("");
+  console.log("下一步清单（这个 exe 只是启动器，不含服务端和数据）：");
+  console.log("  1. 要买/准备：自有域名 + Cloudflare 账号 + Backblaze B2 桶与一对 App Key。");
+  console.log("  2. 要部署：npm run db:migrate:remote + npm run deploy，并绑定自定义域名。");
+  console.log("  3. 要配置：Worker 的 8 个 secret、首次访问密码；可选本机 .env 的 BB_* 与 COLLECTOR_TOKEN。");
+  console.log("  4. 想自动抓 Blackboard：scripts/schedule-collector.ps1（开机 + 每 N 小时）。");
+  console.log("  完整顺序与排障见仓库 installer/README.md「下载者操作手册」。");
+  console.log("  打开后若是空白或报错，说明上面的服务端还没就绪，先检查域名、D1 与 secret。");
 }
 
 function uninstall(args) {
@@ -277,7 +288,10 @@ function printHelp() {
     "",
     "高级参数：--install-dir <目录>  --config-dir <目录>  --no-shortcut",
     "",
-    "网址需要先部署好 StarryStudy 服务端（见仓库 docs/SELF-HOSTING.md）。",
+    "网址需要先部署好 StarryStudy 服务端；从零开始的完整顺序见",
+    "仓库 installer/README.md「下载者操作手册」（要买什么 / 装什么 / 怎么部署 / 排障）。",
+    "准备清单：自有域名 + Cloudflare 账号 + B2 桶；服务端用 npm run deploy，",
+    "并注入 8 个 secret。本 exe 只是桌面启动器，不安装服务端、不含业务数据。",
   ];
   console.log(lines.join("\n"));
 }

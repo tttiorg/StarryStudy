@@ -2,7 +2,7 @@
 // 写请求一律带 rev；服务端 UPDATE ... WHERE rev = ? 不匹配就 409。
 import { z } from "zod";
 import {
-  FILE_CATEGORIES, GRADE_TYPES, MAX_BLOCK, MAX_DAY, MIN_BLOCK, MIN_DAY,
+  FILE_CATEGORIES, GRADE_TYPES, MAX_BLOCKS, MAX_DAY, MIN_BLOCK, MIN_DAY,
   NOTE_CONTENT_MAX, TASK_TYPES,
 } from "./constants";
 
@@ -98,7 +98,8 @@ export const fileUpdate = z.object({
 
 export const timetableSlot = z.object({
   day: z.number().int().min(MIN_DAY).max(MAX_DAY),
-  block: z.number().int().min(MIN_BLOCK).max(MAX_BLOCK),
+  // 上限跟着可自定义的节数走，不再把默认 5 块写死成硬上限
+  block: z.number().int().min(MIN_BLOCK).max(MAX_BLOCKS),
   name: txt(60).default(""),
   room: txt(40).default(""),
   teacher: txt(40).default(""),
@@ -107,13 +108,31 @@ export const timetableSlot = z.object({
   rev: z.number().int().positive().optional(),
 });
 export const timetableBulk = z.object({
-  slots: z.array(timetableSlot).max(42),
+  // 7 天 × 最多 12 节 = 84 格；按可配置上限留余量，不用默认块数推算
+  slots: z.array(timetableSlot).max(MAX_DAY * MAX_BLOCKS),
   mode: z.enum(["merge", "replace"]).default("merge"),
 });
 export const timetableMeta = z.object({
   semester: txt(60).optional(),
   student: txt(60).optional(),
   startDate: date.or(z.literal("")).optional(),
+});
+
+/** 自定义每天节次：序号必须从 1 开始连续递增，服务端按顺序重排后落库。 */
+export const timetableBlocks = z.object({
+  blocks: z
+    .array(
+      z.object({
+        index: z.number().int().min(MIN_BLOCK).max(MAX_BLOCKS),
+        label: txt(24),
+        time: txt(40),
+      }),
+    )
+    .min(1)
+    .max(MAX_BLOCKS)
+    .refine((list) => list.every((b, i) => b.index === i + 1), {
+      message: "节次序号必须从 1 开始连续递增",
+    }),
 });
 
 export const reorder = z.object({ ids: z.array(id).max(200) });

@@ -34,7 +34,7 @@ const router = createRouter({
 });
 
 router.afterEach((to) => {
-  const t = to.meta.title ? `${String(to.meta.title)} · 学习桌面` : "学习桌面";
+  const t = to.meta.title ? `${String(to.meta.title)} · StarryStudy` : "StarryStudy";
   document.title = t;
 });
 

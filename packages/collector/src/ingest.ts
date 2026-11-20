@@ -1,4 +1,5 @@
-// 采集器唯一的云端出口：只走 /api/ingest/*，绝不直连 D1。
+// 采集器唯一的云端出口：数据写入只走 /api/ingest/*，绝不直连 D1；
+// 另有一个 /api/sync/ack 只用来清除「手动抓取」标记，不携带任何学习数据。
 // 提交体里只有 IngestGrade / IngestTask 的字段，不含 done/doneManual/weight/rev
 // 这类用户手填或由服务端维护的字段（白名单由服务端执行，采集器也不发送）。
 import type {
@@ -124,6 +125,39 @@ export class IngestClient {
 
   postTasks(items: IngestTask[]): Promise<IngestSummary> {
     return this.postItems("/api/ingest/tasks", items);
+  }
+
+  /**
+   * 消费一次「手动抓取」请求。采集器本来就是一次性跑全量，跑到这一步说明确实
+   * 抓过了，把云端标记清掉；失败只记日志，不能让清除动作反过来毁掉采集结果。
+   */
+  async ackSync(): Promise<void> {
+    try {
+      await this.requestJson("/api/sync/ack", {
+        method: "POST",
+        headers: tokenHeaders(this.cfg.token),
+        body: "{}",
+      });
+    } catch (e) {
+      console.warn(
+        `[collector] 清除手动抓取请求失败（不影响本次采集）：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /** 把本轮失败写进云端 sync_runs。上报失败不抛给调用方，避免盖住原始故障。 */
+  async reportFailure(source: "grades" | "tasks", error: string): Promise<void> {
+    try {
+      await this.requestJson("/api/sync/fail", {
+        method: "POST",
+        headers: tokenHeaders(this.cfg.token),
+        body: JSON.stringify({ source, error }),
+      });
+    } catch (e) {
+      console.warn(
+        `[collector] 上报失败状态未成功（不影响本次采集）：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   async fetchSubjects(): Promise<Subject[]> {

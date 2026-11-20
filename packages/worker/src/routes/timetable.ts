@@ -1,19 +1,49 @@
-import { BLOCKS, nowIso, timetableBulk, timetableMeta, timetableSlot } from "@starry/shared";
-import type { TimetablePayload, TimetableMeta, TimetableSlot } from "@starry/shared";
+import {
+  BLOCKS, MAX_BLOCKS, MIN_BLOCK, nowIso, parseJson,
+  timetableBlocks, timetableBulk, timetableMeta, timetableSlot,
+} from "@starry/shared";
+import type { TimetableBlock, TimetablePayload, TimetableMeta, TimetableSlot } from "@starry/shared";
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import { getRow, listRows } from "../db";
 import { conflict, json, notFound, parseBody, revOf } from "../util";
 import type { Env } from "../types";
+
+const BLOCKS_KEY = "timetable.blocks";
+
+/**
+ * 读自定义节次。settings 里没有、JSON 坏了、字段类型不对或序号不连续，
+ * 一律回退默认 BLOCKS —— 自动派生字段必须有回退路径，宁可用默认值也不能白屏。
+ */
+async function readBlocks(env: Env): Promise<TimetableBlock[]> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
+    .bind(BLOCKS_KEY).first();
+  const parsed = parseJson<unknown>((row as { value?: string } | null)?.value, null);
+  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_BLOCKS) return BLOCKS;
+  const blocks: TimetableBlock[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    const b = parsed[i] as Record<string, unknown> | null;
+    if (!b || typeof b !== "object" || b.index !== i + 1) return BLOCKS;
+    if (typeof b.label !== "string" || typeof b.time !== "string") return BLOCKS;
+    if (b.label.length > 24 || b.time.length > 40) return BLOCKS;
+    blocks.push({ index: i + 1, label: b.label, time: b.time });
+  }
+  return blocks;
+}
 
 export async function getTimetable(env: Env): Promise<TimetablePayload> {
   const meta = await getRow<TimetableMeta>(
     env,
     "SELECT semester, student, start_date FROM timetable_meta WHERE id = 1",
   );
-  const slots = await listRows<TimetableSlot>(env, "SELECT * FROM timetable_slots");
+  const allSlots = await listRows<TimetableSlot>(env, "SELECT * FROM timetable_slots");
+  const blocks = await readBlocks(env);
+  // 只下发当前节次范围内的格子。减少节数时不删 DB 里的旧课（数据不丢），
+  // 用户把节数加回去后它们会重新出现；前端看到的格子数始终等于 blocks 数。
+  const maxIndex = blocks.length;
+  const slots = allSlots.filter((s) => s.block >= MIN_BLOCK && s.block <= maxIndex);
   return {
     meta: meta ?? { semester: "", student: "", startDate: "" },
-    blocks: BLOCKS,
+    blocks,
     slots,
   };
 }
@@ -60,6 +90,19 @@ export async function handleTimetable(
     }
     const item = await getRow(env, "SELECT semester, student, start_date FROM timetable_meta WHERE id = 1");
     return json({ item });
+  }
+
+  if (parts.length === 1 && parts[0] === "blocks" && method === "PUT") {
+    // 节次是 settings 里的一行单点配置，不是带 rev 的业务记录；沿用
+    // sync.requestedAt / bb.map 的既有写法整体替换，不引入伪 rev。
+    const body = await parseBody(request, timetableBlocks);
+    if (!body.ok) return body.response;
+    const blocks = body.data.blocks;
+    await env.DB.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).bind(BLOCKS_KEY, JSON.stringify(blocks)).run();
+    return json({ ok: true, blocks });
   }
 
   if (parts.length === 1 && parts[0] === "slot" && method === "PUT") {

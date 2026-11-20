@@ -2,7 +2,7 @@
   <div class="gate">
     <div class="gate-card">
       <div class="gate-brand">
-        <span class="gate-mark">学习桌面</span>
+        <span class="gate-mark">StarryStudy</span>
         <span class="gate-sub">{{ needSetup ? "首次使用" : "欢迎回来" }}</span>
       </div>
 

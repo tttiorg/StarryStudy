@@ -47,7 +47,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { BLOCKS, DAYS, weekdayInTZ } from "@starry/shared";
+import { BLOCKS, DAYS, MAX_BLOCKS, weekdayInTZ } from "@starry/shared";
 import type { Subject, TimetableBlock, TimetableSlot } from "@starry/shared";
 import AppIcon from "@/components/AppIcon.vue";
 
@@ -79,8 +79,13 @@ const props = withDefaults(
 const emit = defineEmits(["cell-click", "cell-menu"]);
 
 const dayList = computed(() => Array.from({ length: props.days }, (_, i) => i + 1));
+// 节次以服务端下发的动态配置为准（用户可在课表信息里自定义节数与时间）。
+// 没配置或数据异常时回退默认 BLOCKS；MAX_BLOCKS 只用来兜住越界的坏 index，
+// 不再把默认 5 块写死成渲染上限。
 const blockList = computed<TimetableBlock[]>(() =>
-  props.blocks.length ? props.blocks : (BLOCKS as TimetableBlock[]),
+  (props.blocks.length ? props.blocks : (BLOCKS as TimetableBlock[]))
+    .filter((b) => b.index >= 1 && b.index <= MAX_BLOCKS)
+    .sort((a, b) => a.index - b.index),
 );
 // 今天是周几（1-7），由 shared 按 Asia/Shanghai 算，不直接取系统时间（CF-06）
 const todayDay = weekdayInTZ();

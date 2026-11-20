@@ -108,6 +108,9 @@ if (!existsSync(DB_DIR)) {
 
 const OUT_DIR = arg("out") ? resolve(arg("out")) : join(ROOT, "data", "migrations-output");
 mkdirSync(OUT_DIR, { recursive: true });
+// 待上传文件的持久副本目录。--archive 模式下 DATA 是临时解包目录，末尾 cleanup()
+// 会整个删掉它；清单若直接指向那里，导出一结束路径就全部失效。产物必须自包含。
+const FILES_OUT_DIR = join(OUT_DIR, "files");
 
 // ---------------------------------------------------------------- 工具
 
@@ -328,7 +331,9 @@ function mapTimetable() {
     const day = NUM(s, 0, "day");
     const block = NUM(s, 0, "block", "period");
     // (day, block) 是主键；越界的格子丢弃，避免整份导入破坏约束。
-    if (day < 1 || day > 7 || block < 1 || block > 6) continue;
+    // 上限跟 0001_init.sql / 0003 的 CHECK (block BETWEEN 1 AND 12) 保持一致；
+    // v1 实际最多排 6 块，放宽只为不误丢边界数据，不代表默认课表要显示 12 节。
+    if (day < 1 || day > 7 || block < 1 || block > 12) continue;
     sql.push(
       insert("timetable_slots", {
         day,
@@ -396,7 +401,15 @@ function mapFiles(items) {
           continue;
         }
         seenSha.add(sha);
-        b2.push({ fileId: id, name: S(o, "name"), sha256: sha, objectKey: object_key, localPath: abs, mime, size });
+        // localPath 必须指向本次导出结束后仍然存在的副本：--archive 的 DATA 是临时
+        // 解包目录，末尾 cleanup() 会删掉它，直接写 abs 会让清单里的路径全部失效。
+        // 统一按 sha 复制一份到输出目录，产物自包含，上传完可随 OUT_DIR 一起删除。
+        const copy = join(FILES_OUT_DIR, sha);
+        if (!existsSync(copy)) {
+          mkdirSync(FILES_OUT_DIR, { recursive: true });
+          copyFileSync(abs, copy);
+        }
+        b2.push({ fileId: id, name: S(o, "name"), sha256: sha, objectKey: object_key, localPath: copy, mime, size });
       } else {
         // 上传型但原文件不在（用户可能换过机）：保留行，标记仅电脑可用，不伪造对象地址。
         local_only = 1;
@@ -465,8 +478,8 @@ const header = [
 writeFileSync(join(OUT_DIR, "v1-import.sql"), header + sql.join("\n") + "\n", "utf8");
 
 const manifest = {
-  note: "逐条把 localPath 按 objectKey 上传到 B2 的 blob/<sha前2位>/<sha>；Worker 用 S3 兼容 API 读写对象，可用任意 S3 客户端（aws s3 cp / b2 CLI 等）完成，key 已按内容寻址。",
-  hint: "本清单含真实本机路径，位于已被 gitignore 的目录，切勿提交；上传完即可删除。",
+  note: "逐条把 localPath 按 objectKey 上传到 B2 的 blob/<sha前2位>/<sha>；Worker 用 S3 兼容 API 读写对象，可用任意 S3 客户端（aws s3 cp / b2 CLI 等）完成，key 已按内容寻址。localPath 是输出目录 files/ 下的持久副本（按 sha 命名），不指向 v1 原始目录或临时解包目录，导出结束后仍然有效。",
+  hint: "本清单含真实本机路径，位于已被 gitignore 的目录，切勿提交；上传完即可连同 files/ 副本一起删除。",
   items: b2,
 };
 writeFileSync(join(OUT_DIR, "files-to-b2.json"), JSON.stringify(manifest, null, 2), "utf8");

@@ -62,13 +62,23 @@ async function main() {
   ok("bootstrap 一次拿全", boot.status === 200 && Array.isArray(boot.data.subjects) && Array.isArray(boot.data.timetable.slots));
   const before = boot.data.timetable.slots.length;
 
-  // 验收 #4：只提交一格，其他格子不受影响
-  const slot = { day: 2, block: 3, name: "冒烟测试", room: "X-1", teacher: "", weeks: "", subjectId: null };
+  // 验收 #4：只提交一格，其他格子不受影响。
+  // 自动挑一个当前没占用的格子：固定 day=2/block=3 时上次冒烟留下的数据会让
+  // 「只新增一格」断言失败，测试就没法重复跑了。
+  const occupied = new Set(boot.data.timetable.slots.map((s) => `${s.day}:${s.block}`));
+  let cell = null;
+  for (let day = 1; day <= 7 && !cell; day += 1) {
+    for (let block = 1; block <= 5; block += 1) {
+      if (!occupied.has(`${day}:${block}`)) { cell = { day, block }; break; }
+    }
+  }
+  ok("课表有空余格子可测", !!cell);
+  const slot = { ...cell, name: "冒烟测试", room: "X-1", teacher: "", weeks: "", subjectId: null };
   const putSlot = await call("/api/timetable/slot", { method: "PUT", body: slot });
   ok("课表单格写入", putSlot.status === 200, JSON.stringify(putSlot.data));
   const after = await call("/api/timetable");
   ok("只新增/改动这一格", after.data.slots.length === before + 1 &&
-    after.data.slots.some((s) => s.day === 2 && s.block === 3 && s.name === "冒烟测试"));
+    after.data.slots.some((s) => s.day === cell.day && s.block === cell.block && s.name === "冒烟测试"));
 
   // 验收 #8：陈旧 rev 必须 409，且返回服务端当前完整记录
   const notes = await call("/api/notes");
@@ -110,6 +120,32 @@ async function main() {
     const again = await call("/api/ingest/tasks", { method: "POST", body: { items: [item] }, headers: h });
     const revived = (await call("/api/tasks")).data.items.find((t) => t.srcKey === srcKey);
     ok("软删条目不被复活", !revived && again.data.created === 0, JSON.stringify(again.data));
+
+    // 每小时自动抓取：同一份数据重复 POST 不能 bump rev，否则用户编辑必撞 409
+    const stableKey = `bbcal:smoke-stable-${Date.now()}`;
+    const stable = { ...item, srcKey: stableKey };
+    const s1 = await call("/api/ingest/tasks", { method: "POST", body: { items: [stable] }, headers: h });
+    const rec1 = (await call("/api/tasks")).data.items.find((t) => t.srcKey === stableKey);
+    const s2 = await call("/api/ingest/tasks", { method: "POST", body: { items: [stable] }, headers: h });
+    const rec2 = (await call("/api/tasks")).data.items.find((t) => t.srcKey === stableKey);
+    ok("无变化时 created=0 且 rev 不变",
+      s1.status === 200 && s1.data.created === 1 &&
+      s2.status === 200 && s2.data.created === 0 && s2.data.updated === 0 &&
+      rec1?.rev === rec2?.rev,
+      JSON.stringify({ s1: s1.data, s2: s2.data, rev1: rec1?.rev, rev2: rec2?.rev }));
+
+    // 失败必须能在「数据概览」看到，不能永远只有 ok=1
+    const failUp = await call("/api/sync/fail", {
+      method: "POST", body: { source: "grades", error: "冒烟测试失败记录" }, headers: h,
+    });
+    const st = await call("/api/sync/status");
+    const failed = st.data?.items?.find((r) => r.error === "冒烟测试失败记录");
+    ok("采集器上报失败写入 ok=0 记录",
+      failUp.status === 200 && failed?.ok === false && failed?.error === "冒烟测试失败记录",
+      JSON.stringify({ failUp: failUp.status, found: failed }));
+    // 浏览器会话无权代报失败（只认采集器令牌）
+    const noToken = await call("/api/sync/fail", { method: "POST", body: { source: "grades", error: "x" } });
+    ok("无令牌上报失败被拒 401", noToken.status === 401, String(noToken.status));
   } else {
     console.log("  SKIP  采集器相关断言（未提供 --collector-token）");
   }
@@ -129,6 +165,35 @@ async function main() {
     ok("Range 返回 206 + Content-Range", partial.status === 206 && !!partial.headers.get("content-range"));
   } else {
     ok("文件上传可用", false, JSON.stringify(up.data));
+  }
+
+  // 左键新窗口打开 / 右键下载：同一个对象、同一个路由，只换 Content-Disposition
+  const pdfForm = new FormData();
+  pdfForm.append(
+    "files",
+    new Blob(["%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"], {
+      type: "application/pdf",
+    }),
+    "冒烟测试.pdf",
+  );
+  const pdfUp = await call("/api/files/upload", { method: "POST", body: pdfForm });
+  const pdf = pdfUp.data?.items?.[0] ?? pdfUp.data?.item;
+  if (pdfUp.status === 200 && pdf) {
+    const inline = await call(`/api/files/${pdf.id}/raw`, { raw: true });
+    const inlineDisp = inline.headers.get("content-disposition") || "";
+    ok("左键新窗口：200 + application/pdf + inline",
+      inline.status === 200 &&
+      (inline.headers.get("content-type") || "").includes("application/pdf") &&
+      inlineDisp.startsWith("inline"));
+    const dl = await call(`/api/files/${pdf.id}/raw?dl=1`, { raw: true });
+    const dlDisp = dl.headers.get("content-disposition") || "";
+    ok("右键下载：200 + attachment + 中文文件名",
+      dl.status === 200 && dlDisp.startsWith("attachment") && dlDisp.includes("filename*=UTF-8"));
+    const inlineAgain = await call(`/api/files/${pdf.id}/raw`, { raw: true });
+    ok("下载响应不污染 inline 打开",
+      (inlineAgain.headers.get("content-disposition") || "").startsWith("inline"));
+  } else {
+    ok("PDF 上传可用", false, JSON.stringify(pdfUp.data));
   }
 
   console.log(`\n冒烟测试通过 ${passed} 项。`);

@@ -14,18 +14,18 @@
 
 | 模块 | 内容 |
 |---|---|
-| 主页总览 | 今日日程、临期任务、最近成绩、学科卡片 |
-| 课表 | 周视图；按「天 + 节」单格编辑，不会整份覆盖别的设备刚改的格子 |
-| 学科页 | 三列：成绩、资料、笔记；课程信息与师资为结构化字段 |
-| 资料库 | 上传、按学科分类、标签、置顶、PDF 预览；内容寻址去重 |
-| 日程 / 任务 | 带学科的在学科页当「任务」，不带的在主页当「日程」 |
+| 主页总览 | 今日课表、近期日程、待办与逾期统计、学科卡片、必应每日壁纸（拿不到自动回退本地图） |
+| 课表 | 周视图；按「天 + 节」单格编辑；节数与时间可自定义；清空课表需勾选确认 |
+| 学科页 | 成绩、资料、笔记、教师卡；一个 Blackboard 外链按钮 |
+| 资料库 | 上传、按学科分类、标签、置顶；左键新窗口用浏览器自带 PDF 阅读器打开，右键下载；内容寻址去重 |
+| 日程 / 任务 | 无学科的在首页当「日程」，带学科的留在学科页、同时也汇总进主页「近期日程」 |
 | 成绩 | 分数 / 满分 / 权重 / 类型 / 日期，按学科汇总求和 |
 | 笔记 | 标题 + 正文（最长 200KB），自动保存带 800ms 防抖 |
 | 知识点 | 艾宾浩斯复习排期，间隔 1/2/4/7/15/30/60 天 |
-| 外链竖栏 | 可拖拽排序，抓 favicon |
+| 外链竖栏 | 可拖拽排序，抓 favicon；窄屏收起为右上角覆盖抽屉 |
 | 通知铃铛 | 新任务 / 新成绩 / 临近截止三组，带「水位」判定 |
-| Blackboard 采集 | 本机脚本登录后抓成绩、抓日历，写入云端 |
-| 设置 | 改密码、数据概览 |
+| Blackboard 采集 | 本机脚本抓成绩与日历写入云端；可配置开机自动 + 每 N 小时抓取 |
+| 设置 | 改密码、学科管理、数据概览（BB 抓取状态与失败记录）、课表节次 |
 
 ## 工作方式
 
@@ -36,6 +36,27 @@
 - **不做的事**：移动端原生 App（用浏览器 PWA）、实时协同、离线优先、邮件通知。
 
 `*.workers.dev` 子域在中国大陆被 DNS 污染，**请绑定自定义域名**访问。
+
+## 开始前：要买什么、装什么、配置什么
+
+StarryStudy 是**自托管**应用，不是装完就能用的在线服务。先把下面三件事做完，再打开网页：
+
+| | 你要准备的 | 说明 |
+|---|---|---|
+| 要买什么 | 一个自有域名 | 绑定 Worker 当日常入口；`*.workers.dev` 在中国大陆被 DNS 污染 |
+| | Cloudflare 账号 + Backblaze B2 账号 | 前者跑 Workers / D1 / 域名，后者存上传的文件；个人用量免费额度通常够 |
+| 装什么 | 云端：什么都不用装 | `wrangler deploy` 一次推完 |
+| | 电脑：Node 20+（部署 / 采集时用） | 日常使用只需浏览器；想要独立窗口可装 [Windows 安装包](#桌面启动器) |
+| | 手机 / 平板：什么都不用装 | 浏览器打开同一个网址 |
+| 配置什么 | 服务端：8 个 Worker secret + `wrangler.local.toml` | 见 [自托管部署](docs/SELF-HOSTING.md)，凭据只留本机、不进仓库 |
+| | 首次访问：登录密码 | 浏览器第一次打开时设置 |
+| | 可选采集器：本机 `.env` 的 `BB_*` 与 `COLLECTOR_TOKEN` | 不配也能用，只是 Blackboard 成绩与日程不会自动进来 |
+
+**下载 Release 里的 Windows 安装包？** 先看
+[下载者操作手册](installer/README.md)：它按「要买什么 → 装什么 → 怎么部署 → 怎么安装 →
+怎么日常使用 → 怎么配自动采集 → 出问题怎么查」顺序写给最终使用者。
+更细的清单（含费用与获取方式）也在那份手册里；完整部署步骤见
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)。
 
 ## 快速开始（本地预览）
 
@@ -58,7 +79,8 @@ npm run dev                         # 本地起在 http://localhost:8787
 本地迁移 / 开发开箱即用，不是任何真实基础设施信息。
 
 `migrations/0002_example_seed.sql` 是**完全虚构的演示数据**，让你 clone 下来就能看到界面；
-**部署正式环境前请删掉这个文件再执行迁移**（若已执行过，按 `demo_` 前缀删除即可）。
+**部署正式环境前把它临时移出 `migrations/` 再执行远程迁移，跑完再移回**
+（仓库里保留它是为了本地开箱即用）。若误执行过，按 `demo_` 前缀删除对应记录即可。
 
 ## 部署自己的一份
 
@@ -67,7 +89,8 @@ npm run dev                         # 本地起在 http://localhost:8787
 3. 用 `wrangler secret put` 注入 `AUTH_SECRET`、`AUTH_COLLECTOR_TOKEN`、`NOTICE_WEBHOOK_URL`
    以及 5 个 `B2_*` 凭据；这些值不写进仓库。
 4. `npm run db:migrate:remote` → `npm run deploy`，然后在 Cloudflare 绑定自定义域名。
-5. 本机填好 `.env` 跑 `npm run collect`，让 Blackboard 数据进来。
+5. 本机填好 `.env` 跑 `npm run collect`，让 Blackboard 数据进来；想自动跑可配
+   `scripts/schedule-collector.ps1`（开机 + 每 N 小时，见 [下载者操作手册](installer/README.md) 第 5 步）。
 
 完整部署步骤与自检项见 [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md)；
 架构与数据模型见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、
@@ -121,9 +144,10 @@ starry-study/
 | `npm run smoke` | 接口冒烟；需先 `npm run db:migrate`，并在另一个终端 `npm run dev` |
 | `npm run db:migrate` | 本地 D1 迁移（占位 ID 够用，不连线上） |
 | `npm run db:migrate:remote` | 线上 D1 迁移 |
-| `npm run collect` | 跑本机采集器 |
+| `npm run collect` | 跑本机采集器（自动加载项目根的 `.env`） |
 | `npm run collect:dry` | 采集器 `--dry-run`，只看要写什么、不落库 |
 | `npm run desktop` | 起浏览器全屏窗口（需传 `--url`） |
+| `scripts/schedule-collector.ps1` | Windows 计划任务：开机 + 每 N 小时自动采集（`-IntervalHours` 可改，见手册） |
 
 ## 桌面启动器
 
@@ -135,6 +159,8 @@ npm run desktop -- --url https://你的域名
 会话，登录状态会一直记住。不想装 Node 的话，也可以从
 [Releases](https://github.com/tttiorg/StarryStudy/releases) 下载 Windows 安装包：双击安装、
 填入你自己的访问网址即可，目标机器不需要 Node。
+**安装前请先看 [下载者操作手册](installer/README.md)**——这个 exe 只是启动器，
+服务端要先部署好，手册里有完整的准备清单与排障表。
 
 ## 常见问题
 
@@ -142,6 +168,11 @@ npm run desktop -- --url https://你的域名
   排除，示例文件只有空键名；`npm run check:privacy` 和 CI 会再扫一遍。
 - **能多人共用吗？** 不能，这是单用户自托管应用。
 - **换设备要重装吗？** 不用，浏览器打开同一个网址即可。
+- **`npm run collect` 报 `node: bad option` 或找不到 `package.json`？**
+  前者是旧脚本配低版本 Node，当前脚本已兼容 Node 18/20/22；后者是没在项目根目录执行，
+  先 `cd` 到有 `package.json` 的那一层。详见 [下载者操作手册](installer/README.md) 排障表。
+- **PDF 打开成套娃窗口 / 部署后页面没变？** 前者已改为新窗口 Blob 打开，后者三端强刷一次
+  （Ctrl+F5）拿最新 Service Worker 即可。
 
 ## 开源许可
 

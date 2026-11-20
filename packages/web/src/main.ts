@@ -8,6 +8,7 @@ import "element-plus/theme-chalk/dark/css-vars.css";
 // theme.css 必须在 Element Plus 之后：html.dark / html.light 里要压过它的 --el-* 默认值
 import "@/styles/theme.css";
 import "@/styles/app.css";
+import "@/styles/boot.css";
 
 import App from "./App.vue";
 import router from "./router";

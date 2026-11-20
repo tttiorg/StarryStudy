@@ -321,6 +321,18 @@ export const useDataStore = defineStore("data", () => {
     }
   }
 
+  /** 保存自定义节次。写成功后用服务端返回的 blocks 覆盖本地，避免草稿与服务端漂移。 */
+  async function saveBlocks(blocks: TimetableBlock[]): Promise<boolean> {
+    try {
+      const res = await api.timetable.blocks(blocks);
+      timetable.value = { ...timetable.value, blocks: res.blocks ?? blocks };
+      return true;
+    } catch (e) {
+      ElMessage.error(msgOf(e));
+      return false;
+    }
+  }
+
   /** 清空走 bulk+replace（仅导入用的整份替换接口），不是日常编辑路径 */
   async function clearTimetable(): Promise<boolean> {
     try {
@@ -428,6 +440,7 @@ export const useDataStore = defineStore("data", () => {
     reorderLinks,
     saveSlot,
     saveMeta,
+    saveBlocks,
     clearTimetable,
     importTimetable,
     reviewKnowledge,

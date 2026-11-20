@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "学习桌面 · StarryStudy",
-  "short_name": "学习桌面",
+  "name": "StarryStudy",
+  "short_name": "StarryStudy",
   "description": "单用户、多端同步的学习工作台",
   "start_url": "/",
   "scope": "/",

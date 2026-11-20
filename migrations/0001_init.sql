@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS subjects_sort ON subjects(sort) WHERE deleted_at IS N
 -- 一格一行，主键就是 (day, block)，天然不会整份覆盖（§8.1）
 CREATE TABLE IF NOT EXISTS timetable_slots (
   day        INTEGER NOT NULL CHECK (day BETWEEN 1 AND 7),
-  block      INTEGER NOT NULL CHECK (block BETWEEN 1 AND 6),
+  block      INTEGER NOT NULL CHECK (block BETWEEN 1 AND 12),
   name       TEXT NOT NULL DEFAULT '',
   room       TEXT NOT NULL DEFAULT '',
   teacher    TEXT NOT NULL DEFAULT '',

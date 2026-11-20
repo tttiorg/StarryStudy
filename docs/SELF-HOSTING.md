@@ -7,12 +7,25 @@
 > 文中所有地址都是虚构示例：`study.example.com`（应用）、`example.com`（主域）。换成你
 > 自己买的域名即可，不要把真实域名、IP、桶名、`database_id` 写进任何会被提交的文件。
 
-## 0. 前置
+## 0. 前置：要买什么、装什么、配置什么
 
-- Node 20+（CI 用 22）、npm。
-- 一个自购域名。
-- 一个 Cloudflare 账号。
-- 一个 Backblaze B2 账号。
+| | 项目 | 说明 |
+|---|---|---|
+| 要买 / 注册 | 一个自有域名 | 绑定成应用入口，一年几十到一百多元 |
+| | Cloudflare 账号 | Workers、D1、域名接入；个人用量免费额度够 |
+| | Backblaze B2 账号 + 私有桶 + 一对 Application Key | 存资料文件；10 GB 内通常免费 |
+| 装什么 | 云端：什么都不用装 | `wrangler deploy` 推一次即可 |
+| | 本机：Node 20+（CI 用 22）、npm | 只在部署、跑采集器、构建安装包时需要 |
+| | 日常设备：浏览器即可 | 可选装 Windows 桌面启动器（见 [`installer/README.md`](../installer/README.md)） |
+| 配置什么 | `wrangler.local.toml`：真实 `account_id`、D1 `database_id`、域名 `routes` | 从 `.example` 复制，绝不进仓库 |
+| | 8 个 Worker secret：`AUTH_SECRET`、`AUTH_COLLECTOR_TOKEN`、`NOTICE_WEBHOOK_URL`、5 个 `B2_*` | 见第 4、5 节 |
+| | 首次访问密码 | 浏览器第一次打开时设置 |
+| | 可选：本机 `.env` 的 `BB_*` / `API_BASE_URL` / `COLLECTOR_TOKEN` | 不配不影响网页使用，只是没有自动采集 |
+| | 可选：学科页「编辑信息 → 课程主页」填一次 BB 课程页链接 | 「Blackboard」按钮据此按课程 ID 自动跳转；真实域名由使用者填，不进仓库 |
+
+部署完成后，网页「设置 → 数据概览」会显示 **BB 抓取状态**（最近抓取时间、成功 / 失败）与
+「手动抓取」按钮。云端网页无法直接启动本机采集器，按钮只登记请求；在本机跑一次
+`npm run collect` 即会消费该请求并把结果写回状态页。
 
 ## 常用命令速查
 
@@ -154,18 +167,121 @@ npm run deploy                # npm run build && wrangler deploy --config wrangl
 部署完成后打开 `https://study.example.com`：因为 `auth` 表的 `hash` 初始为空，首次访问会
 进入「设置密码」，设好后即可以单账号登录。
 
-## 8. 本机配采集器
+## 8. 本机配采集器（BB 抓取在哪里配）
 
-采集器只跑在你的电脑上，不进云端、不进仓库：
+BB 抓取**不在网页里配置**：网页跑在 Cloudflare 上，碰不到你校园网里的 Blackboard。
+真正干活的是本机采集器，它读本机的 `.env`，登录后把结果 POST 到云端 `/api/ingest/*`。
+所以一共要配两个地方，缺一个都不会生效。
+
+> **先进入项目目录再跑命令。** `npm run collect:dry` / `npm run collect` 必须在
+> `D:\StarryStudy`（有 `package.json` 的那一层）执行。在 `C:\Users\你的用户名` 下直接跑
+> 会报 `ENOENT ... Could not read package.json`，这不是配置问题：
+> ```powershell
+> cd D:\StarryStudy
+> npm run collect:dry
+> ```
+> 脚本会通过 `scripts/load-env.mjs` 自动加载项目根目录的 `.env`，不需要手动设置环境变量。
+> 这个预加载只用 Node 自带的 `fs`，**Node 18 / 20 / 22 都支持**（不依赖 `--env-file` 这类
+> 高版本才有的选项）；`.env` 不存在时静默跳过，由采集器打印「缺少必要配置」。
+
+| 地方 | 配什么 | 在哪配 |
+|---|---|---|
+| 云端 Worker | `AUTH_COLLECTOR_TOKEN` | 第 5 步的 `wrangler secret put` |
+| 本机采集器 | `.env` 里的 `BB_*` / `COLLECTOR_TOKEN` / `API_BASE_URL` | 本机项目根目录，复制 `.env.example` |
+
+### 8.1 逐项填 `.env`
 
 ```bash
-cp .env.example .env          # Windows 用 copy
-# 按注释填：学校 CAS / Blackboard 地址、账号、API_BASE_URL=https://study.example.com、
-# COLLECTOR_TOKEN（与第 5 步 AUTH_COLLECTOR_TOKEN 一致）；学校地址用 cas.example.com /
-# bb.example.com 这类占位，默认值全空，没配齐采集器不启动。
-npm run collect:dry           # 先空跑，只看要写什么
-npm run collect               # 正式采集，POST /api/ingest/*
+cp .env.example .env          # Windows 用 copy .env.example .env
 ```
+
+按注释填下面几项。示例地址全是占位，换成自己学校的真实地址；**这些值只留在本机**，
+`.env` 已被 gitignore，绝不进仓库。**只有前 6 项必填，其余留空即可**（留空走内置通用
+Blackboard 默认路径）。
+
+| 键 | 填什么 | 去哪里找 |
+|---|---|---|
+| `BB_CAS_URL` | 学校统一登录（CAS）**站点根**，如 `https://cas.example.com` | 打开一次学校统一登录页，地址栏里 `https://` 到第一个 `/` 之间那一段。**只取这一段**，后面的 `/cas/login?service=...` 全部删掉 |
+| `BB_BASE_URL` | Blackboard **站点根**，如 `https://bb.example.com` | 同上，登录进 Blackboard 后取地址栏的 `https://` + 域名，删掉 `/webapps/portal/...` 等所有路径 |
+| `BB_USER` / `BB_PASSWORD` | 学校统一身份认证账号密码 | 就是登录学校 CAS / 信息门户用的那组；.`env` 只在本机，不上传 |
+| `COLLECTOR_TOKEN` | **必须和云端 `AUTH_COLLECTOR_TOKEN` 完全一致**，否则写接口返回 401 | 这个值是你自己生成后写进 Worker secret 的，本机从 `.dev.vars` 的 `AUTH_COLLECTOR_TOKEN` 复制过来即可；不用去学校或 Cloudflare 找 |
+| `API_BASE_URL` | 自己的 Worker 访问地址，如 `https://study.example.com` | 就是 `wrangler.local.toml` 里 `routes` 绑定的自定义域名，加 `https://`、不带路径 |
+| `BB_SERVICE_PATH` | 选填，留空即用通用默认值 | 一般不用填；只有学校 CAS 回跳路径特殊时才改 |
+| `BB_STREAM_PATH` / `BB_MYGRADES_PATH` / `BB_CALENDAR_PATH` | 选填，留空即用通用默认值 | 只有 `collect:dry` 报某类数据抓不到时才按学校实际路径微调 |
+| `BB_SUBJECT_MAP` | 选填：BB `course_id` → 学科 id 的映射 JSON，见 8.2 | 只有 dry-run 输出里出现「未匹配学科」不为 0 时才需要填 |
+
+> **两个地址千万别整条复制浏览器 URL。** 采集器会把 `BB_CAS_URL` / `BB_BASE_URL`
+> 当站点根再拼 `/cas/login`、`/webapps/...`；若填了带 `?service=...` 的完整登录页地址，
+> 会拼出 `https://cas.example.com/cas/login?service=.../cas/login` 这样的错地址。
+> `BB_CAS_URL`、`BB_BASE_URL`、`API_BASE_URL` 三项都必须是「协议 + 域名」的裸根。
+
+6 项必填里任何一项留空，采集器会**直接不启动**而不是崩掉；缺哪几项会明确打印出来。
+
+### 8.2 学科怎么对上
+
+采集器按学科记录里的 `bbCourseId`（形如 `_8497_1`）**精确匹配**，不按课程名模糊匹配：
+
+- 默认从 BB 页面读 course_id，和库里的 `bbCourseId` 对；
+- 对不上时用 `BB_SUBJECT_MAP` 手动指定，例如
+  `{"_8497_1":"<学科id>","_8501_1":"<学科id>"}`，学科 id 可从「设置 → 导入」导出的数据里对照；
+- 「设置 → 学科管理」展开学科后填的 **BB 课程链接**只用于学科页那个「Blackboard」跳转按钮，
+  和采集器抓哪些课是两回事，别混在一起。
+
+### 8.3 跑一次，看结果
+
+```bash
+npm run collect:dry           # 先空跑：只打印准备写入什么，不写云端
+npm run collect               # 正式采集：POST /api/ingest/* 并写 sync_runs
+```
+
+跑完回到网页「设置 → 数据概览 → BB 抓取状态」：
+
+- 「最近抓取」显示北京时间和「x 分钟前」；
+- 「运行状态」显示成功 / 失败，以及新增 / 更新 / 跳过条数；失败时错误信息直接列在下面。
+
+网页上的「手动抓取」按钮**不会**真的去抓：它只在云端登记一次请求
+（`settings['sync.requestedAt']`），等你在本机跑 `npm run collect`，采集器消费该请求、
+写入 `sync_runs` 后再 ack 掉标记。这是架构限制，不是 bug——云端没有你的校园网会话。
+
+### 8.4 开机自动抓取 + 每隔 N 小时自动抓取（Windows）
+
+项目自带两个 PowerShell 脚本，**不需要管理员权限**（触发器是「当前用户登录时」）。
+在 PowerShell 里进入项目根目录执行：
+
+```powershell
+cd D:\StarryStudy
+powershell -ExecutionPolicy Bypass -File .\scripts\schedule-collector.ps1                  # 默认每 1 小时
+powershell -ExecutionPolicy Bypass -File .\scripts\schedule-collector.ps1 -IntervalHours 2 # 改成每 2 小时
+powershell -ExecutionPolicy Bypass -File .\scripts\schedule-collector.ps1 -Status          # 查看状态/上次结果/下次运行
+powershell -ExecutionPolicy Bypass -File .\scripts\schedule-collector.ps1 -Uninstall       # 关闭自动抓取
+```
+
+它会注册一个任务 `StarryStudy-BB-Collect`：**登录时立即抓一次**，之后每 N 小时重复
+（`-IntervalHours` 可改，范围 1~24）。`-ExecutionPolicy Bypass` 只作用于这一条命令，
+不会改系统全局策略。
+
+配套的稳定性设计（无人值守才会用到的保护）：
+
+- **单实例锁**：`data/collector.lock` 用原子创建 + PID 存活检测。上一次没跑完、
+  下一次触发时后者安静跳过，不会并发写云端；进程被强杀后孤儿锁会被自动接管。
+- **日志轮转**：输出写到 `data\collector.log`，超过 512KB 只保留后半段，
+  几年也不会撑满磁盘。用 `Get-Content data\collector.log -Encoding UTF8 -Tail 30` 查看。
+- **失败可见**：登录失败、课程列表为空、某数据源失败都会上报到 `sync_runs`（`ok=0`），
+  「数据概览」能直接看到错误；只有两个源都成功才清掉「手动抓取」标记。
+- **无变化不写**：BB 数据没变时不发 UPDATE、不 bump `rev`，避免每小时把用户手改的
+  备注覆盖回去、导致网页编辑撞 409，也省下 D1 写额度（日志里表现为「跳过 N」）。
+- **错过补跑 / 30 分钟时限**：关机期间错过的会在下次可用时补跑一次；单次卡死超过
+  30 分钟会被终止，不会拖到下一个周期。
+
+macOS / Linux 用 cron 等价配置即可，例如每小时一次：
+
+```cron
+0 * * * * cd /path/to/StarryStudy && node --import ./scripts/load-env.mjs --import tsx packages/collector/src/index.ts >> data/collector.log 2>&1
+```
+
+> 判断有没有生效：看「数据概览」有没有抓取记录，或 `-Status` 里的「上次结果」是否为 0。
+> 一条都没有＝没跑起来，先回 8.1 检查 `.env` 是否填齐、`COLLECTOR_TOKEN` 是否与云端一致，
+> 再看 `data\collector.log`。
 
 可选 `npm run desktop -- --url https://study.example.com` 用系统浏览器开一个全屏独立窗口
 （独立 `--user-data-dir`，见 `packages/desktop`）。

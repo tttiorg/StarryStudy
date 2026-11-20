@@ -1,6 +1,6 @@
 /* 全前端唯一允许出现 fetch 的地方（§12）。组件与 store 一律从这里取数据。
  * v2 用 HttpOnly Cookie 会话：同源请求带 credentials，不写 localStorage token、
- * 不带 Authorization 头。<img>/<iframe> 这类浏览器自发请求也靠 Cookie 通过鉴权。 */
+ * 不带 Authorization 头。<img> / 新窗口打开这类浏览器自发请求也靠 Cookie 通过鉴权。 */
 import type {
   BootstrapPayload,
   FileStats,
@@ -10,8 +10,10 @@ import type {
   Note,
   StudyFile,
   Subject,
+  SyncStatus,
   Task,
   TimetableBlock,
+  WallpaperList,
   TimetableMeta,
   TimetablePayload,
   TimetableSlot,
@@ -192,6 +194,8 @@ const linksApi = {
   ...crud<Link>("/links"),
   reorder: (ids: string[]) =>
     request<unknown>("/links/reorder", { method: "PUT", body: JSON.stringify({ ids }) }),
+  /** 站点图标走同源代理，直连目标站常因证书、登录墙或 CORS 拿不到图（v1 同款做法）。 */
+  faviconUrl: (url: string) => `${BASE}/favicon?url=${encodeURIComponent(url)}`,
 };
 
 const knowledgeApi = {
@@ -210,13 +214,68 @@ export interface UploadResult {
   rev?: number;
 }
 
+/**
+ * 按扩展名给 octet-stream / 空 mime 兜一个浏览器能识别的类型。
+ * blob: URL 打开时，Edge 是否用原生 PDF 阅读器完全取决于 Blob 的 type，
+ * 上传时没带 mime 的老文件会落成 octet-stream，不补就是一点击变下载。
+ */
+function normalizeMime(mime: string, name: string): string {
+  const m = (mime || "").toLowerCase().split(";")[0].trim();
+  if (m && m !== "application/octet-stream") return mime;
+  const ext = name.includes(".") ? (name.split(".").pop() ?? "").toLowerCase() : "";
+  const map: Record<string, string> = {
+    pdf: "application/pdf",
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", avif: "image/avif",
+    txt: "text/plain; charset=utf-8", log: "text/plain; charset=utf-8",
+    md: "text/markdown; charset=utf-8", json: "application/json; charset=utf-8",
+    html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8",
+    mp3: "audio/mpeg", wav: "audio/wav", mp4: "video/mp4", webm: "video/webm",
+  };
+  return map[ext] || mime || "application/octet-stream";
+}
+
+export interface FileBlob {
+  blob: Blob;
+  mime: string;
+  name: string;
+}
+
 const filesApi = {
   ...crud<StudyFile>("/files"),
   upload: (form: FormData) =>
     request<UploadResult>("/files/upload", { method: "POST", body: form }),
   stats: () => request<FileStats>("/files/stats"),
-  /** PDF 内联渲染用；不带任何查询参数，#view=FitH 由组件追加 */
+  /** <img> 缩略图仍用同源 raw 地址，它不是页面导航，SW 不会兜底 */
   rawUrl: (id: string) => `${BASE}/files/${encodeURIComponent(id)}/raw`,
+  /** 右键下载 / 降级路径：?dl=1 让服务端回 Content-Disposition: attachment */
+  downloadUrl: (id: string) => `${BASE}/files/${encodeURIComponent(id)}/raw?dl=1`,
+  /**
+   * 读出文件内容交给调用方用 blob: URL 打开或下载。
+   * 关键：绝不让浏览器「导航」到 /api/...。旧版 Service Worker 的导航兜底、
+   * PWA 独立窗口都可能把这种导航换成 index.html，表现为「套娃的应用窗口 + 404」。
+   * fetch 请求不进导航兜底，再由 blob: URL 打开，Edge 原生阅读器直接渲染。
+   */
+  readFile: async (id: string): Promise<FileBlob> => {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/files/${encodeURIComponent(id)}/raw`, {
+        credentials: "same-origin",
+      });
+    } catch {
+      throw new ApiError(0, "网络不可达，请检查连接");
+    }
+    if (res.status === 401) onUnauthorizedHandler?.();
+    if (!res.ok) throw new ApiError(res.status, `读取文件失败 (${res.status})`);
+    const buf = await res.blob();
+    const disp = res.headers.get("content-disposition") || "";
+    const star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+    const plain = /filename="([^"]*)"/i.exec(disp);
+    const name = star ? decodeURIComponent(star[1]) : (plain?.[1] ?? "");
+    const mime = normalizeMime(buf.type, name);
+    const blob = buf.type === mime ? buf : new Blob([buf], { type: mime });
+    return { blob, mime, name };
+  },
 };
 
 /** 单格写入的响应形状不固定：可能是 {item,rev}，也可能是整张课表。三种都兼容。 */
@@ -240,6 +299,12 @@ const timetableApi = {
     request<TimetableWriteResult>("/timetable/meta", {
       method: "PUT",
       body: JSON.stringify(meta),
+    }),
+  /** 自定义每天节数与时间；整体替换 settings 里的单点配置 */
+  blocks: (blocks: TimetableBlock[]) =>
+    request<TimetableWriteResult>("/timetable/blocks", {
+      method: "PUT",
+      body: JSON.stringify({ blocks }),
     }),
   /** 仅导入 / 清空使用；mode=replace 才整份替换 */
   bulk: (slots: TimetableSlot[], mode: "merge" | "replace" = "merge") =>
@@ -281,11 +346,17 @@ export const api = {
   files: filesApi,
   timetable: timetableApi,
 
+  /** 必应每日壁纸；同源代理，拿不到时 items 为空，由页面回退到本地图。 */
+  wallpaper: {
+    list: () => request<WallpaperList>("/wallpaper/list"),
+  },
+
   settings: {
     noticeSeen: () => request<{ ok: boolean }>("/settings/notice-seen", { method: "POST" }),
   },
   sync: {
-    status: () => request<Record<string, unknown>>("/sync/status"),
+    status: () => request<SyncStatus>("/sync/status"),
+    request: () => request<{ ok: boolean; requestedAt: string }>("/sync/request", { method: "POST" }),
   },
 };
 

@@ -18,8 +18,8 @@
     "smoke": "node scripts/smoke-test.mjs",
     "db:migrate": "wrangler d1 migrations apply starry-study --local",
     "db:migrate:remote": "wrangler d1 migrations apply starry-study --remote --config wrangler.local.toml",
-    "collect": "tsx packages/collector/src/index.ts",
-    "collect:dry": "tsx packages/collector/src/index.ts --dry-run",
+    "collect": "node --import ./scripts/load-env.mjs --import tsx packages/collector/src/index.ts",
+    "collect:dry": "node --import ./scripts/load-env.mjs --import tsx packages/collector/src/index.ts --dry-run",
     "desktop": "tsx packages/desktop/src/index.ts"
   },
   "devDependencies": {

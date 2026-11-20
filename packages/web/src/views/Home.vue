@@ -1,39 +1,37 @@
 <template>
   <div class="home">
-    <!-- 问候 + 学期信息 -->
+    <!-- 问候 -->
     <header class="hi">
-      <div>
-        <h1 class="hi-title">
-          {{ greeting }}<template v-if="meta.student">，{{ meta.student }}</template>
-        </h1>
-        <p class="hi-sub">
-          <span v-if="meta.semester">{{ meta.semester }}</span>
-          <span v-if="weekNo"> · 第 {{ weekNo }} 周</span>
-          <span> · {{ today }} {{ DAYS[weekday - 1] }}</span>
-        </p>
-      </div>
-      <button class="ss-btn primary" @click="openCreate">
-        <AppIcon name="plus" :size="14" /> 新建日程
-      </button>
+      <h1 class="hi-title">
+        {{ greeting }}<template v-if="meta.student">，{{ meta.student }}</template>
+      </h1>
+      <p class="hi-sub">
+        <span v-if="meta.semester">{{ meta.semester }}</span>
+        <span v-if="weekNo"> · 第 {{ weekNo }} 周</span>
+        <span> · {{ today }} {{ DAYS[weekday - 1] }}</span>
+      </p>
     </header>
 
-    <!-- 天数卡 -->
-    <div class="day-cards">
-      <div class="day-card">
-        <span class="dc-k">今天课程</span>
-        <span class="dc-v">{{ todayClasses }}<em>节</em></span>
+    <!-- 名言壁纸 + 天数大卡：还原 v1 的 row-top -->
+    <div class="row-top">
+      <div class="quote-card" :style="bgStyle">
+        <div class="q-inner">
+          <div class="q-text">{{ quote.text }}</div>
+          <div class="q-from">— {{ quote.from }}</div>
+        </div>
+        <span v-if="wallpaperCredit" class="q-credit" :title="wallpaperCredit">{{ wallpaperCredit }}</span>
+        <button class="q-refresh" title="换一条" @click="refreshQuote">换一换</button>
       </div>
+
       <div class="day-card">
-        <span class="dc-k">待办</span>
-        <span class="dc-v">{{ todoCount }}<em>项</em></span>
-      </div>
-      <div class="day-card" :class="{ warn: overdueCount > 0 }">
-        <span class="dc-k">逾期</span>
-        <span class="dc-v">{{ overdueCount }}<em>项</em></span>
-      </div>
-      <div class="day-card">
-        <span class="dc-k">开学</span>
-        <span class="dc-v">{{ daysSinceStart }}<em>天</em></span>
+        <div class="dc-label">开学已</div>
+        <div class="dc-num">{{ daysSinceStart }}<span class="dc-unit">天</span></div>
+        <div class="dc-divider" />
+        <div class="dc-stats">
+          <span>今天 <b>{{ todayClasses }}</b> 节课</span>
+          <span>待办 <b>{{ todoCount }}</b></span>
+          <span :class="{ warn: overdueCount > 0 }">逾期 <b>{{ overdueCount }}</b></span>
+        </div>
       </div>
     </div>
 
@@ -50,30 +48,33 @@
           :subjects="data.subjects"
           :days="5"
           compact
-          @cell-click="goTimetable"
+          @cell-click="onCellClick"
         />
       </section>
 
-      <!-- 近期日程 -->
-      <section class="ss-card">
+      <!-- 近期日程：新建按钮收在卡片头部，不再挂在页面标题行（v1 位置） -->
+      <section class="ss-card sched-card">
         <div class="card-head">
           <span class="ss-panel-title">近期日程</span>
-          <span class="ss-panel-sub">共 {{ shown.length }} 条</span>
-          <div class="ss-tabs head-tabs">
-            <button :class="{ on: timelineTab === 'open' }" @click="timelineTab = 'open'">
-              待完成 <b v-if="openCount">{{ openCount }}</b>
-            </button>
-            <button :class="{ on: timelineTab === 'done' }" @click="timelineTab = 'done'">
-              已完成 {{ doneCount }}
-            </button>
+          <div class="head-right">
+            <span class="ss-panel-sub">{{ openCount }} 项未完成</span>
+            <button class="mini-add" @click="openCreate">新建日程</button>
           </div>
-          <button v-if="overdueOnly" class="ss-btn" @click="overdueOnly = false">显示全部</button>
         </div>
+        <div class="ss-tabs head-tabs">
+          <button :class="{ on: timelineTab === 'open' }" @click="timelineTab = 'open'">
+            待完成 <b v-if="openCount">{{ openCount }}</b>
+          </button>
+          <button :class="{ on: timelineTab === 'done' }" @click="timelineTab = 'done'">
+            已完成 {{ doneCount }}
+          </button>
+        </div>
+        <button v-if="overdueOnly" class="ss-btn show-all" @click="overdueOnly = false">显示全部</button>
         <ScheduleTimeline
           :groups="groups"
           :overdue="overdueList"
           :subjects="data.subjects"
-          empty-text="还没有日程，点右上角「新建日程」添加"
+          empty-text="还没有日程，点上方「新建日程」添加"
           @toggle="toggleTask"
           @edit="openEdit"
           @menu="onTaskMenu"
@@ -82,7 +83,7 @@
       </section>
     </div>
 
-    <!-- 学科卡片 -->
+    <!-- 学科卡片：桌面固定 3 列，还原 v1 的彩色竖条与教师 / 教室 / 周次信息 -->
     <section class="subjects-section">
       <div class="card-head">
         <span class="ss-panel-title">学科</span>
@@ -94,13 +95,23 @@
           v-for="s in data.subjects"
           :key="s.id"
           class="subject-card"
+          :style="{ '--sc': s.color }"
           @click="goSubject(s.id)"
         >
-          <span class="sc-dot" :style="{ background: s.color }" />
-          <span class="sc-name">{{ s.name }}</span>
-          <span class="sc-meta">
-            成绩 {{ countOf("grades", s.id) }} · 任务 {{ countOf("tasks", s.id) }} · 笔记 {{ countOf("notes", s.id) }}
-          </span>
+          <div class="sc-top">
+            <span class="sc-name">{{ s.name }}</span>
+            <span class="sc-dot" />
+          </div>
+          <div class="sc-meta">
+            <span v-if="teacherOf(s)">{{ teacherOf(s) }}</span>
+            <span v-if="s.course?.room" class="sc-room">{{ s.course.room }}</span>
+          </div>
+          <div class="sc-foot">
+            <template v-if="s.course?.weeks">{{ s.course.weeks }}</template>
+            <template v-else>
+              成绩 {{ countOf("grades", s.id) }} · 任务 {{ countOf("tasks", s.id) }} · 笔记 {{ countOf("notes", s.id) }}
+            </template>
+          </div>
         </button>
       </div>
     </section>
@@ -156,12 +167,12 @@ import {
   todayInTZ,
   weekdayInTZ,
 } from "@starry/shared";
-import type { Task, TaskType } from "@starry/shared";
+import type { Subject, Task, TaskType, TimetableSlot, Wallpaper } from "@starry/shared";
+import { api } from "@/api";
 import { useDataStore } from "@/stores/data";
 import TimetableGrid from "@/components/TimetableGrid.vue";
 import ScheduleTimeline from "@/components/ScheduleTimeline.vue";
 import ContextMenu from "@/components/ContextMenu.vue";
-import AppIcon from "@/components/AppIcon.vue";
 
 const router = useRouter();
 const data = useDataStore();
@@ -177,6 +188,74 @@ const TYPE_LABEL: Record<TaskType, string> = {
   activity: "活动",
   task: "待办",
 };
+
+/* ---------------- 名言 + 壁纸 ----------------
+ * 壁纸优先用必应每日图（Worker 同源代理 + 边缘缓存），拿不到就退回仓库自带的
+ * campus.jpg。图源失败不能让首页空白，所以加载失败一律当作「用本地图」。 */
+const QUOTES: { text: string; from: string }[] = [
+  { text: "真正的勤勉，从来不是长时间的无脑劳作，而是持续高质量地解决真问题。", from: "学习笔记" },
+  { text: "你现在做的一页笔记，可能是考试前一小时救你的那一页。", from: "过来人" },
+  { text: "所有的一鸣惊人，其实都是厚积薄发。", from: "《人民日报》" },
+  { text: "不要因为走得慢就停下，怕的是你连方向都没有。", from: "随手记" },
+  { text: "把不会的题抄下来，比刷十道会做的题更有价值。", from: "错题本法" },
+  { text: "大学的自由，是把时间花在真正想学会的东西上。", from: "自勉" },
+  { text: "复习不是重新学一遍，是把记忆的绳子再系紧一次。", from: "艾宾浩斯" },
+  { text: "今天多熬的半小时，明天会以另一种方式还给你。", from: "匿名" },
+  { text: "你不需要很厉害才能开始，但你需要开始才会很厉害。", from: "网络" },
+  { text: "知识的复利，靠的是持续不断的小额投入。", from: "自学手册" },
+  { text: "慢一点没关系，方向对了就行。", from: "写给自己" },
+  { text: "把大目标切成今天能做完的那一小块。", from: "执行法则" },
+  { text: "没有白走的路，每一步都算数。", from: "李宗盛" },
+  { text: "读书的意义，是让你有底气做选择，而不是被选择。", from: "自勉" },
+  { text: "所有自律的本质，都是对未来自己的善意。", from: "随笔" },
+];
+
+const quoteIdx = ref(Math.floor(Math.random() * QUOTES.length));
+const quote = computed(() => QUOTES[quoteIdx.value]);
+
+/* 壁纸从 /api/wallpaper/list 拿最近 8 天，随机挑一张；「换一换」同时换名言和壁纸。
+   wpIdx = -1 表示没有可用壁纸，bgStyle 里就只留渐变 + 本地 campus.jpg。 */
+const wallpapers = ref<Wallpaper[]>([]);
+const wpIdx = ref(-1);
+const wallpaper = computed(() => (wpIdx.value >= 0 ? wallpapers.value[wpIdx.value] : null));
+const wallpaperCredit = computed(() => wallpaper.value?.credit || "");
+const LOCAL_WALLPAPER = 'url("/campus.jpg")';
+
+/* 壁纸与深色渐变是 .quote-card 同一元素的两层 background-image，逐层单独指定
+   size / position：渐变层 100% 100% 铺满，图片层 cover 且下对齐（宽屏下能看见
+   底部）。两层共用同一个 border-box 坐标系，不可能出现缝；不用 ::before，因为
+   它的 inset:0 只覆盖 padding box，会在 1px 边框内侧露一圈没加渐变的图片。
+   这里只覆盖图片那一层的 url（--wallpaper-url），渐变层的尺寸与位置仍在 CSS。 */
+const bgStyle = computed(() => ({
+  "--wallpaper-url": wallpaper.value?.src
+    ? `url("${wallpaper.value.src}")`
+    : LOCAL_WALLPAPER,
+}));
+
+async function loadWallpaper(): Promise<void> {
+  try {
+    const data = await api.wallpaper.list();
+    const items = data.items || [];
+    wallpapers.value = items;
+    wpIdx.value = items.length ? Math.floor(Math.random() * items.length) : -1;
+  } catch {
+    wallpapers.value = [];
+    wpIdx.value = -1;
+  }
+}
+
+function refreshQuote(): void {
+  let next = quoteIdx.value;
+  while (next === quoteIdx.value) next = Math.floor(Math.random() * QUOTES.length);
+  quoteIdx.value = next;
+
+  // 有多张壁纸时连带换一张；只有一张或没拿到时保持不动
+  if (wallpapers.value.length > 1) {
+    let i = wpIdx.value;
+    while (i === wpIdx.value) i = Math.floor(Math.random() * wallpapers.value.length);
+    wpIdx.value = i;
+  }
+}
 
 const greeting = computed(() => {
   const h = Number(hhmmInTZ().slice(0, 2));
@@ -205,8 +284,11 @@ const overdueCount = computed(
 );
 
 /* ---------------- 日程时间线 ----------------
- * 不带 subjectId 的任务是「主页日程」，带学科的在学科页当任务。 */
-const schedules = computed(() => data.tasks.filter((t) => !t.subjectId));
+ * 近期日程展示全部任务：既包括不带学科的主页日程，也包括带 subjectId 的课程任务
+ * （BB 采集的作业/考试、学科页手建的待办）。课程任务照旧留在各自学科页，
+ * 这里只是把它们一并汇总到时间线；ScheduleTimeline 会显示学科名标签，点开仍能编辑。
+ * 顶部「待办 / 逾期」统计本就按全部任务算，改这里正好让列表与计数一致。 */
+const schedules = computed(() => data.tasks);
 const openList = computed(() => schedules.value.filter((t) => !t.done));
 const doneList = computed(() => schedules.value.filter((t) => t.done));
 const openCount = computed(() => openList.value.length);
@@ -246,12 +328,28 @@ function countOf(kind: "grades" | "tasks" | "notes", id: string): number {
   return data.notes.filter((n) => n.subjectId === id).length;
 }
 
+/** 学科卡上的教师名：优先用教师卡里的姓名，其次用课程信息里的教师 */
+function teacherOf(s: Subject): string {
+  return s.faculty?.name || s.course?.teacher || "";
+}
+
 function goTimetable(): void {
   void router.push("/timetable");
 }
 
 function goSubject(id: string): void {
   void router.push(`/subjects/${id}`);
+}
+
+/** 主页课表格：点了有课且已关联学科的格子，直接跳对应学科标签页；
+ *  空格子、或课程还没建对应学科时，才回退到完整课表（保持原来的行为）。 */
+function onCellClick(p: { day: number; block: number; slot: TimetableSlot | null }): void {
+  const sid = p.slot?.subjectId;
+  if (sid && data.subjects.some((s) => s.id === sid)) {
+    goSubject(sid);
+  } else {
+    goTimetable();
+  }
 }
 
 /* ---------------- 任务写操作 ---------------- */
@@ -351,6 +449,7 @@ async function removeTask(t: Task): Promise<void> {
 
 onMounted(() => {
   void data.loadAll(false);
+  void loadWallpaper();
 });
 </script>
 
@@ -363,15 +462,15 @@ onMounted(() => {
 
 .hi {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .hi-title {
-  margin: 0 0 3px;
-  font-size: 21px;
-  font-weight: 650;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 680;
+  letter-spacing: 0.3px;
 }
 
 .hi-sub {
@@ -380,51 +479,171 @@ onMounted(() => {
   color: var(--ss-muted);
 }
 
-.day-cards {
+/* 名言 + 天数：桌面左右两栏，窄屏上下堆叠。
+   minmax(0,1fr) 不能写成 1fr，否则内容会把整列顶宽、页面出现横向滚动条。 */
+.row-top {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 210px;
+  gap: 14px;
+}
+
+.quote-card {
+  position: relative;
+  min-height: 168px;
+  border-radius: var(--ss-radius);
+  border: 1px solid var(--ss-border);
+  padding: 26px 30px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  /* 渐变与图片是同一元素的两层 background，共用同一个 border-box 坐标系，
+     逐层单独指定 size / position，层与层之间不可能错位，也就不会有缝。
+     渐变层 100% 100% 铺满且不定位；图片层 cover + 下对齐，宽屏下仍能看到
+     底部的校名石。不再用 ::before：它的 inset:0 只覆盖 padding box，
+     比 border-box 小一圈（正好是 1px 边框），四周都会露出没加渐变的图片。 */
+  background-image:
+    linear-gradient(105deg, rgba(9, 14, 17, 0.92) 0%, rgba(9, 14, 17, 0.62) 45%, rgba(9, 14, 17, 0.18) 100%),
+    var(--wallpaper-url, url("/campus.jpg"));
+  background-size: 100% 100%, cover;
+  background-position: 0 0, center bottom;
+  background-origin: border-box, border-box;
+  background-clip: border-box, border-box;
+  background-repeat: no-repeat;
+}
+
+.q-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
+}
+
+.q-text {
+  font-size: 19.5px;
+  line-height: 1.75;
+  font-weight: 500;
+  color: #f2f6fb;
+  letter-spacing: 0.4px;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
+
+.q-from {
+  margin-top: 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.q-refresh {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 11.5px;
+  padding: 4px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.q-refresh:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* 壁纸版权说明：必应要求保留，右下角贴边、不挡名言，窄屏可折行 */
+.q-credit {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  z-index: 1;
+  max-width: 46%;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.72);
+  text-align: right;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .day-card {
+  background: var(--ss-surface);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius);
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 14px 16px;
-  border: 1px solid var(--ss-border);
-  border-radius: 12px;
-  background: var(--ss-surface);
+  justify-content: center;
 }
 
-.day-card.warn .dc-v {
+.dc-label {
+  font-size: 12px;
+  color: var(--ss-muted);
+}
+
+.dc-num {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ss-accent);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.dc-unit {
+  font-size: 15px;
+  margin-left: 5px;
+  color: var(--ss-muted);
+  font-weight: 500;
+}
+
+.dc-divider {
+  height: 1px;
+  background: var(--ss-border);
+  margin: 12px 0 10px;
+}
+
+.dc-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12.5px;
+  color: var(--ss-muted);
+}
+
+.dc-stats b {
+  color: var(--ss-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.dc-stats .warn b {
   color: var(--ss-danger);
 }
 
-.dc-k {
-  font-size: 11.5px;
-  color: var(--ss-muted);
-}
-
-.dc-v {
-  font-size: 24px;
-  font-weight: 650;
-  color: var(--ss-text);
-  line-height: 1.2;
-}
-
-.dc-v em {
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 400;
-  color: var(--ss-muted);
-  margin-left: 3px;
-}
-
+/* 课表宽、日程窄：还原 v1 的 1.45fr / 1fr。两张卡等高，
+   日程卡不贡献行高，超出的日程在卡内滚动，不会把左列课表顶出大片留白。 */
 .home-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.sched-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sched-card :deep(.timeline) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .card-head {
@@ -439,8 +658,42 @@ onMounted(() => {
   margin-left: auto;
 }
 
-.head-tabs {
+/* 近期日程：新建按钮回到卡片头部（v1 位置），不再挂在页面标题行 */
+.head-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.mini-add {
+  background: transparent;
+  border: 1px solid var(--ss-border);
+  color: var(--ss-text-2);
+  font-size: 12px;
+  padding: 3px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.mini-add:hover {
+  border-color: var(--ss-accent);
+  color: var(--ss-accent);
+  background: var(--ss-accent-soft);
+}
+
+.head-tabs {
+  margin: 0 0 10px;
+  flex: none;
+}
+
+.show-all {
+  margin: 0 0 10px;
+  flex: none;
 }
 
 .tt-card :deep(.tt) {
@@ -451,17 +704,17 @@ onMounted(() => {
   margin-top: 2px;
 }
 
+/* 桌面固定 3 列：auto-fill 会在大屏摊成 5~6 列，卡片太窄、底部学科栏看着错位 */
 .subject-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .subject-card {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 14px;
+  position: relative;
+  display: block;
+  padding: 12px 14px 12px 16px;
   border: 1px solid var(--ss-border);
   border-radius: 12px;
   background: var(--ss-surface);
@@ -469,39 +722,92 @@ onMounted(() => {
   text-align: left;
   cursor: pointer;
   font-family: inherit;
+  overflow: hidden;
   transition: all 0.15s;
 }
 
+.subject-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--sc, var(--ss-accent));
+}
+
 .subject-card:hover {
-  border-color: var(--ss-accent);
+  border-color: color-mix(in srgb, var(--sc, var(--ss-accent)) 55%, var(--ss-border));
   transform: translateY(-1px);
 }
 
-.sc-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 3px;
+.sc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .sc-name {
-  font-size: 14px;
+  font-size: 15.5px;
   font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sc, var(--ss-accent));
+  flex: none;
 }
 
 .sc-meta {
-  font-size: 11px;
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12.5px;
   color: var(--ss-muted);
+  overflow: hidden;
 }
 
-@media (max-width: 900px) {
+.sc-room {
+  opacity: 0.75;
+}
+
+.sc-foot {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--ss-dim);
+}
+
+/* 窄到 1100px 时两列并排会把课表挤变形，改成上下堆叠，
+   日程卡恢复普通流并用 max-height 限高（和 v1 同一断点）。 */
+@media (max-width: 1100px) {
   .home-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+  .sched-card :deep(.timeline) {
+    max-height: 380px;
   }
 }
 
-@media (max-width: 560px) {
-  .day-cards {
-    grid-template-columns: repeat(2, 1fr);
+@media (max-width: 900px) {
+  .row-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .subject-grid {
+    grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .subject-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 8px;
   }
 }
 </style>
